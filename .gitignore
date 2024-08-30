@@ -1,0 +1,30 @@
+.env
+
+# Ignore virtual environment folders
+/env/
+/venv/
+/macro_dashboard_env/
+
+/# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore database files
+*.sqlite3
+*.db
+
+# Ignore log files
+*.log
+
+# Ignore system files
+.idea/
+.vscode/
+*.swp
+
+# Ignore static and media files (optional)
+staticfiles/
+media/
