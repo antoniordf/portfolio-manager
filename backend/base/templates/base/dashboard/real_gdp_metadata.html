@@ -5,11 +5,11 @@
 {% block content %}
     <h1>Economic Dashboard</h1>
     {% for gdp in real_gdp_metadata %}
-        {{ gdp.name }}<br>
-        {{ gdp.source }}<br>
-        {{ gdp.description }}<br>
-        {{ gdp.units }}<br>
-        {{ gdp.frequency }}<br>
-        {{ gdp.last_updated }}<br>
+        <p>Name: {{ gdp.name }}</p><br>
+        <p>Source: {{ gdp.source }}</p><br>
+        <p>Description: {{ gdp.description }}</p><br>
+        <p>Units: {{ gdp.units }}</p><br>
+        <p>Frequency: {{ gdp.frequency }}</p><br>
+        <p>Last Updated: {{ gdp.last_updated }}</p><br>
     {% endfor %}
 {% endblock %}
