@@ -1,0 +1,15 @@
+{% extends "base/base.html" %}
+
+{% block title %}Economic Dashboard{% endblock %}
+
+{% block content %}
+    <h1>Economic Dashboard</h1>
+    {% for gdp in real_gdp_metadata %}
+        {{ gdp.name }}<br>
+        {{ gdp.source }}<br>
+        {{ gdp.description }}<br>
+        {{ gdp.units }}<br>
+        {{ gdp.frequency }}<br>
+        {{ gdp.last_updated }}<br>
+    {% endfor %}
+{% endblock %}

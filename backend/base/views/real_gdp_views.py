@@ -6,7 +6,7 @@ def real_gdp_metadata(request):
     real_gdp_metadata = RealGDP.objects.all()
     
     return render(request, 
-                  'real_gdp_metadata.html', 
+                  'base/dashboard/real_gdp_metadata.html', 
                   {'real_gdp_metadata': real_gdp_metadata})
     
 
@@ -18,5 +18,5 @@ def real_gdp_data_points(request, series_id):
     data_points = real_gdp_series.data_points.all()
 
     return render(request, 
-                  'real_gdp_data_points.html', 
+                  'base/dashboard/real_gdp_data_points.html', 
                   {'real_gdp_series': real_gdp_series, 'data_points': data_points})
