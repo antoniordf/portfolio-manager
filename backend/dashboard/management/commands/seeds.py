@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
-from base.utils import fetch_and_save_metadata, fetch_and_save_series
-from base.models.real_gdp import RealGDP
+from dashboard.utils import fetch_and_save_metadata, fetch_and_save_series
+from dashboard.models.real_gdp import RealGDP
 from django.conf import settings
 
 class Command(BaseCommand):

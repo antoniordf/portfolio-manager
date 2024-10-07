@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from base.models import RealGDP
+from dashboard.models import RealGDP
 
 # Class-based view for Real GDP metadata
 class RealGDPMetadataView(APIView):

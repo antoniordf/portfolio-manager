@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import RealGDPMetadataView, RealGDPDataPointsView
 
-app_name = 'base'
+app_name = 'dashboard'
 
 urlpatterns = [
     path('real_gdp_metadata/', RealGDPMetadataView.as_view(), name='real_gdp_metadata'),
