@@ -2,6 +2,7 @@ import requests
 from .models import DataSeries
 from django.contrib.contenttypes.models import ContentType
 from .models import DataPoint
+from datetime import datetime, timedelta
 
 def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin):
     """
@@ -69,9 +70,11 @@ def fetch_and_save_series(api_key, data_series_instance, data_origin):
         content_type = ContentType.objects.get_for_model(data_series_instance)
         
         for observation in observations:
-            date = observation['date']
+            date_str = observation['date']
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    
             if last_date and date <= last_date:
-                # Skip data points that are already present
+            # Skip data points that are already present
                 continue
             
             value = observation['value']
