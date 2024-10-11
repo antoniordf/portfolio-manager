@@ -10,10 +10,7 @@ class QuadrantDataView(APIView):
         # Optional: get date range from query parameters
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
-        # Set return_period to 'yearly' for YoY calculations
-        gdp_return_period = 'quarterly'
-        inflation_return_period = 'quarterly'
-        data_points = 25  # Default to 20 data points
+        data_points = 25  # Default to 25 data points
 
         # Parse dates if provided
         if start_date:
@@ -22,33 +19,43 @@ class QuadrantDataView(APIView):
             end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
 
         try:
-            # Fetch data points for real GDP and inflation
+            # Fetch data series for real GDP and inflation
             real_gdp_series = RealGDP.objects.get(series_id='GDPC1')
             inflation_series = NominalInflation.objects.get(series_id='CPIAUCSL')
-            
-            # Calculate returns (growth rates)
-            real_gdp_returns = real_gdp_series.calculate_returns(
-                data_frequency=real_gdp_series.frequency, 
-                return_period=gdp_return_period, 
-                annualize=False
-            )
-            inflation_returns = inflation_series.calculate_returns(
-                data_frequency=inflation_series.frequency, 
-                return_period=inflation_return_period, 
-                annualize=False
-            )
-            
-            # Convert returns dictionaries to lists of tuples and sort by date
-            real_gdp_returns = sorted(real_gdp_returns.items())
-            inflation_returns = sorted(inflation_returns.items())
 
-            # Synchronize dates between GDP and inflation returns
-            data = self.synchronize_and_merge_returns(
-                real_gdp_returns, inflation_returns, start_date, end_date
+            # Calculate YoY changes and rates of change for GDP
+            gdp_df = real_gdp_series.calculate_returns(
+                data_frequency=real_gdp_series.frequency
             )
 
-            # Limit the number of data points to the latest 20 entries
-            data = data[-data_points:]  # Get the latest 20 data points
+            # Calculate YoY changes and rates of change for Inflation
+            inflation_df = inflation_series.calculate_returns(
+                data_frequency=inflation_series.frequency
+            )
+
+            # Align Inflation data to GDP dates
+            inflation_df_aligned = inflation_df.reindex(gdp_df.index, method='nearest')
+
+            # Ensure the indices (dates) are the same
+            common_dates = gdp_df.index.intersection(inflation_df_aligned.index)
+
+            # Apply date range filtering
+            if start_date:
+                common_dates = [date for date in common_dates if date.date() >= start_date]
+            if end_date:
+                common_dates = [date for date in common_dates if date.date() <= end_date]
+
+            # Prepare the data
+            data = []
+            for date in common_dates[-data_points:]:  # Get the latest data points
+                gdp_rate_of_change = gdp_df.loc[date, 'rate_of_change']
+                inflation_rate_of_change = inflation_df_aligned.loc[date, 'rate_of_change']
+
+                data.append({
+                    'date': date.date(),  # Convert to date object
+                    'gdp_growth': gdp_rate_of_change * 100,          # Convert to percentage
+                    'inflation_growth': inflation_rate_of_change * 100,  # Convert to percentage
+                })
 
             # Use the serializer to validate and serialize the data
             serializer = QuadrantDataPointSerializer(data=data, many=True)
@@ -56,7 +63,7 @@ class QuadrantDataView(APIView):
                 return Response(serializer.data, status=status.HTTP_200_OK)
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+
         except (RealGDP.DoesNotExist, NominalInflation.DoesNotExist):
             return Response({'error': 'Data series not found'}, status=status.HTTP_404_NOT_FOUND)
         except ValueError as e:

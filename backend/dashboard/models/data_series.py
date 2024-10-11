@@ -17,7 +17,7 @@ class DataSeries(models.Model):
     frequency = models.CharField(max_length=50)
     units = models.CharField(max_length=100)
     seasonal_adjustment = models.CharField(max_length=100)
-    last_updated = models.DateTimeField()
+    last_updated = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
@@ -52,7 +52,7 @@ class DataSeries(models.Model):
         # Returns the entire time series as a sorted list of tuples (date, value)
         return sorted([(dp.date, dp.value) for dp in self.data_points.all()], key=lambda x: x[0])
 
-    def calculate_returns(self, data_frequency, return_period="quarterly", annualize=False) -> dict:
+    def calculate_returns(self, data_frequency) -> dict:
         """
         Calculate the returns for the time series data based on the specified period.
         Parameters:
@@ -69,37 +69,30 @@ class DataSeries(models.Model):
         df.set_index('date', inplace=True)
         df.sort_index(inplace=True)  # Ensure dates are in order
 
-        # Resample the data
+        # Calculate YoY growth rates
         if data_frequency == "Monthly":
-            # Resample to quarterly frequency, dates at the start of the quarter
-            df = df.resample('QS').mean()
-            # Set periods for quarterly data
-            periods = 1 if return_period == 'quarterly' else 4 if return_period == 'yearly' else None
-            if periods is None:
-                raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
+            # Calculate YoY growth rates (12 months apart)
+            yoy_returns = df.pct_change(periods=12)
         elif data_frequency == "Quarterly":
-            # No resampling needed
-            periods = 1 if return_period == 'quarterly' else 4 if return_period == 'yearly' else None
-            if periods is None:
-                raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
+            # Calculate YoY growth rates (4 quarters apart)
+            yoy_returns = df.pct_change(periods=4)
         else:
             raise ValueError(f"Unsupported data frequency: {data_frequency}")
 
-        # Calculate returns
-        returns = df.pct_change(periods=periods)
-        returns.dropna(inplace=True)
+        # Calculate the rate of change of YoY growth rates
+        delta_returns = yoy_returns - yoy_returns.shift(periods=1)
 
-        if annualize:
-            # Annualize the returns
-            if data_frequency == "Quarterly":
-                returns = (1 + returns) ** 4 - 1
-            elif data_frequency == "Monthly":
-                returns = (1 + returns) ** 12 - 1
-            else:
-                raise ValueError(f"Annualization not supported for data frequency: {data_frequency}")
-        
-        returns_dict = returns['value'].to_dict()
-        return returns_dict
+        # Combine into a single DataFrame
+        result_df = pd.DataFrame({
+            'value': df['value'],
+            'yoy_change': yoy_returns['value'],
+            'rate_of_change': delta_returns['value']
+        })
+
+        # Drop NaN values resulting from the calculations
+        result_df.dropna(inplace=True)
+
+        return result_df
     
     def get_return_series(self, period) -> list:
         """

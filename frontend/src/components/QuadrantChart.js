@@ -47,7 +47,7 @@ function QuadrantChart() {
         type="number"
         dataKey="inflation_growth"
         name="Inflation Growth (%)"
-        domain={[-8, 8]}
+        domain={[-2, 2]}
         label={{
           value: "Inflation Growth (%)",
           position: "insideBottom",
