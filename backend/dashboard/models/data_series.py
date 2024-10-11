@@ -1,11 +1,12 @@
 import csv
 from django.db import models
 from dateutil.relativedelta import relativedelta
-from dateutil import relativedelta
+from dateutil.relativedelta import relativedelta
 from datetime import timedelta
 from .data_point import DataPoint
 import numpy as np
 from scipy import stats as scipy_stats
+import pandas as pd
 
 # Parent class: Represents the metadata and methods for the time series
 class DataSeries(models.Model):
@@ -51,7 +52,7 @@ class DataSeries(models.Model):
         # Returns the entire time series as a sorted list of tuples (date, value)
         return sorted([(dp.date, dp.value) for dp in self.data_points.all()], key=lambda x: x[0])
 
-    def calculate_returns(self, data_frequency, return_period="daily") -> dict:
+    def calculate_returns(self, data_frequency, return_period="quarterly", annualize=False) -> dict:
         """
         Calculate the returns for the time series data based on the specified period.
         Parameters:
@@ -59,61 +60,51 @@ class DataSeries(models.Model):
         - return_period (str): The period over which to calculate returns (e.g., "daily", "weekly", "monthly", "yearly").
         """
         time_series = self.get_time_series()
-        
-        # Convert time_series to a dictionary for quick access by date
-        time_series_dict = {date: value for date, value in time_series}
-        returns = {}
+        df = pd.DataFrame(time_series, columns=['date', 'value'])
 
-        def calculate_return_for_period(offset_func):
-            """
-            Helper function to calculate returns for a given period offset.
-            """
-            for i in range(1, len(time_series)):
-                current_date, current_value = time_series[i]
-                previous_date = offset_func(current_date)
-                if previous_date in time_series_dict:
-                    previous_value = time_series_dict[previous_date]
-                    return_value = (current_value / previous_value) - 1
-                    returns[current_date] = return_value
+        # Convert 'date' column to datetime
+        df['date'] = pd.to_datetime(df['date'])
 
-        # Determine the valid return periods based on the data frequency
-        if data_frequency == "Daily":
-            if return_period == "daily":
-                calculate_return_for_period(lambda date: date - timedelta(days=1))
-            elif return_period == "weekly":
-                calculate_return_for_period(lambda date: date - timedelta(weeks=1))
-            elif return_period == "monthly":
-                calculate_return_for_period(lambda date: date - relativedelta(months=1))
-            elif return_period == "quarterly":
-                calculate_return_for_period(lambda date: date - relativedelta(months=3))
-            elif return_period == "yearly":
-                calculate_return_for_period(lambda date: date - relativedelta(years=1))
-        elif data_frequency == "Monthly":
-            if return_period == "monthly":
-                calculate_return_for_period(lambda date: date - relativedelta(months=1))
-            elif return_period == "quarterly":
-                calculate_return_for_period(lambda date: date - relativedelta(months=3))
-            elif return_period == "yearly":
-                calculate_return_for_period(lambda date: date - relativedelta(years=1))
-            else:
-                raise ValueError(f"Cannot calculate {return_period} returns from monthly data.")
-        elif data_frequency == "Quarterly":
-            if return_period == "quarterly":
-                calculate_return_for_period(lambda date: date - relativedelta(months=3))
-            elif return_period == "yearly":
-                calculate_return_for_period(lambda date: date - relativedelta(years=1))
-            else:
-                raise ValueError(f"Cannot calculate {return_period} returns from quarterly data.")
-        elif data_frequency == "Yearly":
+        # Set 'date' as the index
+        df.set_index('date', inplace=True)
+        df.sort_index(inplace=True)  # Ensure dates are in order
+
+        # Resample the data
+        if data_frequency == "Monthly":
+            # Resample to quarterly frequency
+            df = df.resample('QS').mean()
+            # Adjust periods for quarterly data
             if return_period == "yearly":
-                calculate_return_for_period(lambda date: date - relativedelta(years=1))
+                periods = 4  # 4 quarters in a year
+            elif return_period == "quarterly":
+                periods = 1  # Quarter-over-quarter
             else:
-                raise ValueError(f"Cannot calculate {return_period} returns from yearly data.")
+                raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
+        elif data_frequency == "Quarterly":
+            if return_period == "yearly":
+                periods = 4
+            elif return_period == "quarterly":
+                periods = 1
+            else:
+                raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
         else:
             raise ValueError(f"Unsupported data frequency: {data_frequency}")
 
-        # Return the dictionary of returns with dates as keys
-        return returns
+        # Calculate returns
+        returns = df.pct_change(periods=periods)
+        returns.dropna(inplace=True)
+
+        if annualize:
+            # Annualize the returns
+            if data_frequency == "Quarterly":
+                returns = (1 + returns) ** 4 - 1
+            elif data_frequency == "Monthly":
+                returns = (1 + returns) ** 12 - 1
+            else:
+                raise ValueError(f"Annualization not supported for data frequency: {data_frequency}")
+        
+        returns_dict = returns['value'].to_dict()
+        return returns_dict
     
     def get_return_series(self, period) -> list:
         """

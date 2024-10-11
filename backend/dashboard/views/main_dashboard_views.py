@@ -10,7 +10,10 @@ class QuadrantDataView(APIView):
         # Optional: get date range from query parameters
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
-        return_period = request.query_params.get('return_period', 'quarterly')  # Default to 'quarterly' for GDP
+        # Set return_period to 'yearly' for YoY calculations
+        gdp_return_period = 'quarterly'
+        inflation_return_period = 'quarterly'
+        data_points = 25  # Default to 20 data points
 
         # Parse dates if provided
         if start_date:
@@ -25,10 +28,14 @@ class QuadrantDataView(APIView):
             
             # Calculate returns (growth rates)
             real_gdp_returns = real_gdp_series.calculate_returns(
-                data_frequency=real_gdp_series.frequency, return_period=return_period
+                data_frequency=real_gdp_series.frequency, 
+                return_period=gdp_return_period, 
+                annualize=False
             )
             inflation_returns = inflation_series.calculate_returns(
-                data_frequency=inflation_series.frequency, return_period='monthly'
+                data_frequency=inflation_series.frequency, 
+                return_period=inflation_return_period, 
+                annualize=False
             )
             
             # Convert returns dictionaries to lists of tuples and sort by date
@@ -39,6 +46,9 @@ class QuadrantDataView(APIView):
             data = self.synchronize_and_merge_returns(
                 real_gdp_returns, inflation_returns, start_date, end_date
             )
+
+            # Limit the number of data points to the latest 20 entries
+            data = data[-data_points:]  # Get the latest 20 data points
 
             # Use the serializer to validate and serialize the data
             serializer = QuadrantDataPointSerializer(data=data, many=True)
@@ -57,8 +67,8 @@ class QuadrantDataView(APIView):
         gdp_returns_dict = dict(real_gdp_returns)
         inflation_returns_dict = dict(inflation_returns)
 
-        # Create a list of dates from the inflation data (monthly dates)
-        dates = sorted(inflation_returns_dict.keys())
+        # Get the intersection of dates (quarterly dates)
+        dates = sorted(set(gdp_returns_dict.keys()) & set(inflation_returns_dict.keys()))
 
         # Apply date range filtering
         if start_date:
@@ -68,16 +78,11 @@ class QuadrantDataView(APIView):
 
         data = []
         for date in dates:
-            # Find the corresponding GDP date (previous quarter)
-            gdp_date = max([d for d in gdp_returns_dict.keys() if d <= date], default=None)
-            if gdp_date is None:
-                continue  # Skip if no GDP data is available before this date
-
-            gdp_growth = gdp_returns_dict[gdp_date]
+            gdp_growth = gdp_returns_dict[date]
             inflation_growth = inflation_returns_dict[date]
 
             data.append({
-                'date': date,
+                'date': date.date(),  # Convert to date object
                 'gdp_growth': gdp_growth * 100,          # Convert to percentage
                 'inflation_growth': inflation_growth * 100,  # Convert to percentage
             })

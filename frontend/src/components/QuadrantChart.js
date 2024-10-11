@@ -12,11 +12,12 @@ import {
 
 function QuadrantChart() {
   const [data, setData] = useState([]);
+  const [lastDataPoint, setLastDataPoint] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch("/quadrant_data/");
+        const response = await fetch("/dashboard/quadrant_data/");
         if (!response.ok) {
           throw new Error(`${response.status} ${response.statusText}`);
         }
@@ -26,7 +27,8 @@ function QuadrantChart() {
           gdp_growth: item.gdp_growth,
           inflation_growth: item.inflation_growth,
         }));
-        setData(processedData);
+        setData(processedData.slice(0, -1)); // All data except the last one
+        setLastDataPoint(processedData[processedData.length - 1]); // The last data point
       } catch (error) {
         console.error("Error fetching data: ", error);
       }
@@ -40,11 +42,12 @@ function QuadrantChart() {
       height={600}
       margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
     >
-      <CartesianGrid />
+      <CartesianGrid vertical={false} horizontal={false} />
       <XAxis
         type="number"
         dataKey="inflation_growth"
         name="Inflation Growth (%)"
+        domain={[-8, 8]}
         label={{
           value: "Inflation Growth (%)",
           position: "insideBottom",
@@ -55,6 +58,7 @@ function QuadrantChart() {
         type="number"
         dataKey="gdp_growth"
         name="GDP Growth (%)"
+        domain={[-4, 4]}
         label={{
           value: "GDP Growth (%)",
           angle: -90,
@@ -67,6 +71,9 @@ function QuadrantChart() {
       <ReferenceLine x={0} stroke="red" />
       <ReferenceLine y={0} stroke="red" />
       <Scatter name="Economic Data" data={data} fill="#8884d8" />
+      {lastDataPoint && (
+        <Scatter name="Latest Data" data={[lastDataPoint]} fill="red" />
+      )}
     </ScatterChart>
   );
 }
