@@ -71,21 +71,16 @@ class DataSeries(models.Model):
 
         # Resample the data
         if data_frequency == "Monthly":
-            # Resample to quarterly frequency
+            # Resample to quarterly frequency, dates at the start of the quarter
             df = df.resample('QS').mean()
-            # Adjust periods for quarterly data
-            if return_period == "yearly":
-                periods = 4  # 4 quarters in a year
-            elif return_period == "quarterly":
-                periods = 1  # Quarter-over-quarter
-            else:
+            # Set periods for quarterly data
+            periods = 1 if return_period == 'quarterly' else 4 if return_period == 'yearly' else None
+            if periods is None:
                 raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
         elif data_frequency == "Quarterly":
-            if return_period == "yearly":
-                periods = 4
-            elif return_period == "quarterly":
-                periods = 1
-            else:
+            # No resampling needed
+            periods = 1 if return_period == 'quarterly' else 4 if return_period == 'yearly' else None
+            if periods is None:
                 raise ValueError(f"Unsupported return_period for quarterly data: {return_period}")
         else:
             raise ValueError(f"Unsupported data frequency: {data_frequency}")
