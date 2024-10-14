@@ -79,14 +79,10 @@ class DataSeries(models.Model):
         else:
             raise ValueError(f"Unsupported data frequency: {data_frequency}")
 
-        # Calculate the rate of change of YoY growth rates
-        delta_returns = yoy_returns - yoy_returns.shift(periods=1)
-
         # Combine into a single DataFrame
         result_df = pd.DataFrame({
             'value': df['value'],
             'yoy_change': yoy_returns['value'],
-            'rate_of_change': delta_returns['value']
         })
 
         # Drop NaN values resulting from the calculations

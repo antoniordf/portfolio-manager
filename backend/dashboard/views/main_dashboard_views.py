@@ -4,6 +4,7 @@ from rest_framework import status
 from dashboard.models import RealGDP, NominalInflation
 from dashboard.serializers import QuadrantDataPointSerializer
 from datetime import datetime
+import pandas as pd
 
 class QuadrantDataView(APIView):
     def get(self, request):
@@ -33,28 +34,48 @@ class QuadrantDataView(APIView):
                 data_frequency=inflation_series.frequency
             )
 
-            # Align Inflation data to GDP dates
-            inflation_df_aligned = inflation_df.reindex(gdp_df.index, method='nearest')
+            # Resample inflation data to quarterly frequency
+            inflation_df_quarterly = inflation_df.resample('QS').first()
 
-            # Ensure the indices (dates) are the same
+            # Align the inflation data with GDP data
+            inflation_df_aligned = inflation_df_quarterly.reindex(gdp_df.index)
+
+            # Drop any NaN values resulting from reindexing
+            inflation_df_aligned.dropna(inplace=True)
+            gdp_df = gdp_df.loc[inflation_df_aligned.index]
+
+            # Recalculate rate_of_change for both GDP and Inflation over one period (quarter)
+            gdp_df['rate_of_change'] = gdp_df['yoy_change'] - gdp_df['yoy_change'].shift(1)
+            inflation_df_aligned['rate_of_change'] = inflation_df_aligned['yoy_change'] - inflation_df_aligned['yoy_change'].shift(1)
+
+            # Drop NaN values resulting from shift
+            gdp_df.dropna(inplace=True)
+            inflation_df_aligned.dropna(inplace=True)
+
+            # Ensure both DataFrames have the same indices after dropping NaNs
             common_dates = gdp_df.index.intersection(inflation_df_aligned.index)
+            gdp_df = gdp_df.loc[common_dates]
+            inflation_df_aligned = inflation_df_aligned.loc[common_dates]
+
+            # Combine the DataFrames
+            combined_df = pd.concat([gdp_df, inflation_df_aligned], axis=1, keys=['gdp', 'inflation'])
 
             # Apply date range filtering
             if start_date:
-                common_dates = [date for date in common_dates if date.date() >= start_date]
+                combined_df = combined_df[combined_df.index.date >= start_date]
             if end_date:
-                common_dates = [date for date in common_dates if date.date() <= end_date]
+                combined_df = combined_df[combined_df.index.date <= end_date]
+
+            # Limit the number of data points to the latest entries
+            combined_df = combined_df.tail(data_points)
 
             # Prepare the data
             data = []
-            for date in common_dates[-data_points:]:  # Get the latest data points
-                gdp_rate_of_change = gdp_df.loc[date, 'rate_of_change']
-                inflation_rate_of_change = inflation_df_aligned.loc[date, 'rate_of_change']
-
+            for date, row in combined_df.iterrows():
                 data.append({
-                    'date': date.date(),  # Convert to date object
-                    'gdp_growth': gdp_rate_of_change * 100,          # Convert to percentage
-                    'inflation_growth': inflation_rate_of_change * 100,  # Convert to percentage
+                    'date': date.date(),
+                    'gdp_growth': round(row[('gdp', 'rate_of_change')] * 100, 4),
+                    'inflation_growth': round(row[('inflation', 'rate_of_change')] * 100, 4),
                 })
 
             # Use the serializer to validate and serialize the data
@@ -69,29 +90,3 @@ class QuadrantDataView(APIView):
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         
-    def synchronize_and_merge_returns(self, real_gdp_returns, inflation_returns, start_date=None, end_date=None):
-        # Convert lists of tuples to dictionaries for quick access
-        gdp_returns_dict = dict(real_gdp_returns)
-        inflation_returns_dict = dict(inflation_returns)
-
-        # Get the intersection of dates (quarterly dates)
-        dates = sorted(set(gdp_returns_dict.keys()) & set(inflation_returns_dict.keys()))
-
-        # Apply date range filtering
-        if start_date:
-            dates = [date for date in dates if date >= start_date]
-        if end_date:
-            dates = [date for date in dates if date <= end_date]
-
-        data = []
-        for date in dates:
-            gdp_growth = gdp_returns_dict[date]
-            inflation_growth = inflation_returns_dict[date]
-
-            data.append({
-                'date': date.date(),  # Convert to date object
-                'gdp_growth': gdp_growth * 100,          # Convert to percentage
-                'inflation_growth': inflation_growth * 100,  # Convert to percentage
-            })
-
-        return data
