@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ComposedChart,
   Scatter,
@@ -11,6 +11,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
+import CustomTooltip from "./CustomTooltip";
 
 function QuadrantChart() {
   const [data, setData] = useState([]);
@@ -31,7 +32,7 @@ function QuadrantChart() {
             inflation_growth: item.inflation_growth,
           }))
           .sort((a, b) => a.date - b.date);
-        setData(sortedData.slice(0, -1)); // All data except the last one
+        setData(sortedData); // All data except the last one
         setLastDataPoint(sortedData[sortedData.length - 1]); // The last data point
       } catch (error) {
         console.error("Error fetching data: ", error);
@@ -40,13 +41,61 @@ function QuadrantChart() {
     fetchData();
   }, []);
 
+  // Memoize axis configurations to optimize performance
+  const axisConfig = useMemo(() => {
+    if (data.length === 0) {
+      return {
+        xDomain: [0, 0],
+        xTicks: [],
+        yDomain: [0, 0],
+        yTicks: [],
+      };
+    }
+
+    // Extract values for GDP and Inflation
+    const gdpValues = data.map((d) => d.gdp_growth);
+    const inflationValues = data.map((d) => d.inflation_growth);
+
+    // Calculate min and max with padding
+    const gdpMin = Math.min(...gdpValues);
+    const gdpMax = Math.max(...gdpValues);
+    const inflationMin = Math.min(...inflationValues);
+    const inflationMax = Math.max(...inflationValues);
+
+    const gdpPadding = 1; // Adjust padding as needed
+    const inflationPadding = 0.5;
+
+    const xDomain = [
+      Math.floor(inflationMin - inflationPadding),
+      Math.ceil(inflationMax + inflationPadding),
+    ];
+    const yDomain = [
+      Math.floor(gdpMin - gdpPadding),
+      Math.ceil(gdpMax + gdpPadding),
+    ];
+
+    // Generate ticks based on domain with a step of 1
+    const generateTicks = (min, max, step = 1) => {
+      const ticks = [];
+      for (let i = min; i <= max; i += step) {
+        ticks.push(i);
+      }
+      return ticks;
+    };
+
+    const xTicks = generateTicks(xDomain[0], xDomain[1]);
+    const yTicks = generateTicks(yDomain[0], yDomain[1]);
+
+    return { xDomain, xTicks, yDomain, yTicks };
+  }, [data]);
+
   return (
     <ResponsiveContainer width="100%" height={600}>
       <ComposedChart
         data={data}
         margin={{ top: 20, right: 40, bottom: 20, left: 40 }}
       >
-        {/* Cartesian Grid */}
+        {/* Cartesian Grid without vertical and horizontal lines */}
         <CartesianGrid vertical={false} horizontal={false} />
 
         {/* X-Axis Configuration */}
@@ -54,8 +103,8 @@ function QuadrantChart() {
           type="number"
           dataKey="inflation_growth"
           name="Inflation Rate of Change (%)"
-          domain={[-3, 3]}
-          ticks={[-3, -2, -1, 0, 1, 2, 3]}
+          domain={axisConfig.xDomain}
+          ticks={axisConfig.xTicks}
           label={{
             value: "Inflation Rate of Change (%)",
             position: "insideBottom",
@@ -68,11 +117,8 @@ function QuadrantChart() {
           type="number"
           dataKey="gdp_growth"
           name="GDP Rate of Change (%)"
-          domain={[-10, 10]}
-          ticks={[
-            -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6,
-            7, 8, 9, 10, 11,
-          ]}
+          domain={axisConfig.yDomain}
+          ticks={axisConfig.yTicks}
           label={{
             value: "GDP Rate of Change (%)",
             angle: -90,
@@ -81,15 +127,8 @@ function QuadrantChart() {
           }}
         />
 
-        {/* Tooltip with Fixed labelFormatter */}
-        <Tooltip
-          cursor={{ strokeDasharray: "3 3" }}
-          formatter={(value) => `${value.toFixed(2)}%`}
-          labelFormatter={(label) => {
-            const date = new Date(label);
-            return isNaN(date) ? label : date.toLocaleDateString();
-          }}
-        />
+        {/* Tooltip with Custom Tooltip Component */}
+        <Tooltip content={<CustomTooltip />} />
 
         {/* Legend */}
         <Legend verticalAlign="top" height={36} />
@@ -98,21 +137,22 @@ function QuadrantChart() {
         <ReferenceLine x={0} stroke="red" />
         <ReferenceLine y={0} stroke="red" />
 
-        {/* Scatter for Historical Data */}
+        {/* Scatter for Historical Data (excluding the last data point) */}
         <Scatter
           name="Historical Data"
-          data={data}
+          data={data.slice(0, -1)}
           fill="#8884d8"
-          // line={{ stroke: "#8884d8", strokeWidth: 2 }}
+          shape="circle"
+          size={60}
         />
 
         {/* Line Connecting All Data Points */}
         <Line
-          type="cardinal"
+          type="cardinal" // You can switch to "monotone" if desired
           dataKey="gdp_growth"
           stroke="#82ca9d"
           dot={false}
-          name="GDP / Inflation Rate of Change"
+          name="GDP Rate of Change"
         />
 
         {/* Scatter for the Latest Data Point */}
@@ -122,6 +162,7 @@ function QuadrantChart() {
             data={[lastDataPoint]}
             fill="red"
             shape="circle"
+            size={80}
           />
         )}
       </ComposedChart>

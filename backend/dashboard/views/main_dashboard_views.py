@@ -11,7 +11,7 @@ class QuadrantDataView(APIView):
         # Optional: get date range from query parameters
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
-        data_points = 25  # Default to 25 data points
+        data_points = 15
 
         # Parse dates if provided
         if start_date:
