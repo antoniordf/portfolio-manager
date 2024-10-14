@@ -8,23 +8,15 @@ const CustomTooltip = ({ active, payload }) => {
     const inflationGrowth = dataPoint.inflation_growth.toFixed(2);
 
     return (
-      <div
-        className="custom-tooltip"
-        style={{
-          backgroundColor: "#fff",
-          padding: "10px",
-          border: "1px solid #ccc",
-          borderRadius: "5px",
-        }}
-      >
+      <div className="custom-tooltip">
         <p>
           <strong>Date:</strong> {date}
         </p>
         <p>
-          <strong>GDP Rate of Change:</strong> {gdpGrowth}%
+          <strong>GDP Growth:</strong> {gdpGrowth}%
         </p>
         <p>
-          <strong>Inflation Rate of Change:</strong> {inflationGrowth}%
+          <strong>Inflation Growth:</strong> {inflationGrowth}%
         </p>
       </div>
     );
