@@ -13,10 +13,10 @@ const CustomTooltip = ({ active, payload }) => {
           <strong>Date:</strong> {date}
         </p>
         <p>
-          <strong>GDP Growth:</strong> {gdpGrowth}%
+          <strong>GDP Rate of Change:</strong> {gdpGrowth}%
         </p>
         <p>
-          <strong>Inflation Growth:</strong> {inflationGrowth}%
+          <strong>Inflation Rate of Change:</strong> {inflationGrowth}%
         </p>
       </div>
     );
