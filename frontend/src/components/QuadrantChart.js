@@ -11,35 +11,45 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
+import { useQuery, gql } from "@apollo/client";
 import CustomTooltip from "./CustomTooltip";
+
+// Define the GraphQL query
+const GET_QUADRANT_DATA = gql`
+  query GetQuadrantData($dataPoints: Int!) {
+    quadrantData(dataPoints: $dataPoints) {
+      date
+      gdpGrowth
+      inflationGrowth
+    }
+  }
+`;
 
 function QuadrantChart() {
   const [data, setData] = useState([]);
   const [lastDataPoint, setLastDataPoint] = useState(null);
 
+  const {
+    loading,
+    error,
+    data: queryData,
+  } = useQuery(GET_QUADRANT_DATA, {
+    variables: { dataPoints: 15 },
+  });
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await fetch("/dashboard/quadrant_data/");
-        if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        const sortedData = data
-          .map((item) => ({
-            date: new Date(item.date),
-            gdp_growth: item.gdp_growth,
-            inflation_growth: item.inflation_growth,
-          }))
-          .sort((a, b) => a.date - b.date);
-        setData(sortedData); // All data except the last one
-        setLastDataPoint(sortedData[sortedData.length - 1]); // The last data point
-      } catch (error) {
-        console.error("Error fetching data: ", error);
-      }
-    };
-    fetchData();
-  }, []);
+    if (queryData) {
+      const sortedData = queryData.quadrantData
+        .map((item) => ({
+          date: new Date(item.date),
+          gdp_growth: item.gdpGrowth,
+          inflation_growth: item.inflationGrowth,
+        }))
+        .sort((a, b) => a.date - b.date);
+      setData(sortedData);
+      setLastDataPoint(sortedData[sortedData.length - 1]);
+    }
+  }, [queryData]);
 
   // Memoize axis configurations to optimize performance
   const axisConfig = useMemo(() => {
@@ -88,6 +98,9 @@ function QuadrantChart() {
 
     return { xDomain, xTicks, yDomain, yTicks };
   }, [data]);
+
+  if (loading) return <p>Loading...</p>;
+  if (error) return <p>Error fetching data.</p>;
 
   return (
     <ResponsiveContainer width="100%" height={600}>
