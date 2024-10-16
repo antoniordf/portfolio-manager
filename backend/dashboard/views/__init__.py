@@ -2,4 +2,3 @@ from .real_gdp_views import RealGDPMetadataView, RealGDPDataPointsView
 from .corporate_bond_spread_views import CorporateBondSpreadMetadataView, CorporateBondSpreadDataPointsView
 from .fed_funds_rate_views import FedFundsRateMetadataView, FedFundsRateDataPointsView
 from .nominal_inflation_views import NominalInflationMetadataView, NominalInflationDataPointsView
-from .main_dashboard_views import QuadrantDataView

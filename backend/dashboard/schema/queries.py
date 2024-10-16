@@ -1,48 +1,8 @@
 import graphene
-from graphene_django import DjangoObjectType
-from .models.real_gdp import RealGDP
-from .models.nominal_inflation import NominalInflation
-from .models.data_point import DataPoint
-from datetime import datetime
+from .types import RealGDPType, NominalInflationType, QuadrantDataPointType
+from dashboard.models import RealGDP, NominalInflation
 import pandas as pd
 
-# Define a GraphQL type for DataPoint
-class DataPointType(DjangoObjectType):
-    class Meta:
-        model = DataPoint
-        fields = ('id', 'date', 'value')
-
-# Define a GraphQL type for RealGDP
-class RealGDPType(DjangoObjectType):
-    data_points = graphene.List(DataPointType)
-
-    class Meta:
-        model = RealGDP
-        fields = (
-            'id',
-            'name',
-            'series_id',
-            'observation_start',
-            'observation_end',
-            'frequency',
-            'units',
-            'seasonal_adjustment',
-            'last_updated',
-            'notes',
-            'metadata',
-        )
-
-    # Resolve data_points field
-    def resolve_data_points(self, info):
-        return self.data_points.all().order_by('date')
-
-# Define a GraphQL type for QuadrantDataPoint 
-class QuadrantDataPointType(graphene.ObjectType):
-    date = graphene.Date()
-    gdp_growth = graphene.Float()
-    inflation_growth = graphene.Float()
-
-# Define the Query class for the dashboard app
 class Query(graphene.ObjectType):
     real_gdp = graphene.Field(RealGDPType, id=graphene.Int(required=True))
 
