@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from datetime import datetime
 from rest_framework import status
-from dashboard.models import RealGDP, TreasuryYield, ConcreteDataSeries, NominalInflation, DataPoint
+from dashboard.models import RealGDP, TreasuryYield, ConcreteDataSeries, NominalInflation, DataPoint, EconomicDataPoint
 from .utils import fetch_and_save_metadata, fetch_and_save_series
 from django.conf import settings
 import pprint
@@ -162,14 +162,14 @@ class CalculateReturnsTest(TestCase):
             )
 
             for date_str, value in zip(gdp_dates, gdp_values):
-                DataPoint.objects.create(
+                EconomicDataPoint.objects.create(
                     series=self.real_gdp_series,
                     date=datetime.strptime(date_str, '%Y-%m-%d'),
                     value=value
                 )
 
             for date_str, value in zip(inflation_dates, inflation_values):
-                DataPoint.objects.create(
+                EconomicDataPoint.objects.create(
                     series=self.inflation_series,
                     date=datetime.strptime(date_str, '%Y-%m-%d'),
                     value=value
@@ -211,14 +211,14 @@ class QuadrantDataViewTest(TestCase):
         )
 
         for date_str, value in zip(gdp_dates, gdp_values):
-            DataPoint.objects.create(
+            EconomicDataPoint.objects.create(
                 series=self.real_gdp_series,
                 date=datetime.strptime(date_str, '%Y-%m-%d'),
                 value=value
             )
 
         for date_str, value in zip(inflation_dates, inflation_values):
-            DataPoint.objects.create(
+            EconomicDataPoint.objects.create(
                 series=self.inflation_series,
                 date=datetime.strptime(date_str, '%Y-%m-%d'),
                 value=value

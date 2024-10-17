@@ -56,61 +56,8 @@ class Command(BaseCommand):
                 'model': TreasuryYield,
                 'data_origin': 'fred',
             },
-            {
-                'name': '2-Year Treasury Yield',
-                'series_id': 'GS2',
-                'model': TreasuryYield,
-                'data_origin': 'fred',
-            },
-            {
-                'name': '5-Year Treasury Yield',
-                'series_id': 'GS5',
-                'model': TreasuryYield,
-                'data_origin': 'fred',
-            },
-            {
-                'name': '7-Year Treasury Yield',
-                'series_id': 'GS7',
-                'model': TreasuryYield,
-                'data_origin': 'fred',
-            },
-            {
-                'name': '15-Year Treasury Yield',
-                'series_id': 'GS15',
-                'model': TreasuryYield,
-                'data_origin': 'fred',
-            },
-            {
-                'name': '30-Year Treasury Yield',
-                'series_id': 'GS30',
-                'model': TreasuryYield,
-                'data_origin': 'fred',
-            },
-            {
-                'name': 'VIX (CBOE Volatility Index)',
-                'series_id': 'VIXCLS',
-                'model': VIX,
-                'data_origin': 'fred',
-            },
-            # Add other indicators not available in FRED as placeholders
-            # {
-            #     'name': 'Real Interest Rate',
-            #     'series_id': None,  # No FRED series ID
-            #     'model': RealInterestRate,
-            #     'data_origin': 'custom',
-            # },
+            # Add other indicators as needed
         ]
-
-        # Check if the database is empty
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';")
-            result = cursor.fetchone()
-            is_db_empty = result[0] == 0
-
-        if is_db_empty:
-            self.stdout.write("Database is empty. Downloading all data.")
-        else:
-            self.stdout.write("Database is not empty. Checking for updates.")
 
         for indicator in indicators:
             name = indicator['name']
@@ -122,28 +69,33 @@ class Command(BaseCommand):
 
             try:
                 if data_origin == 'fred':
-                    if not model_class.objects.filter(series_id=series_id).exists():
-                        data_series_instance = fetch_and_save_metadata(api_key, series_id, model_class, data_origin)
-                        self.stdout.write(self.style.SUCCESS(f"{name} metadata downloaded and saved."))
-                    else:
-                        data_series_instance = model_class.objects.get(series_id=series_id)
-                        self.stdout.write(f"{name} metadata already exists.")
+                    # Create or get the series instance
+                    series_instance, created = model_class.objects.get_or_create(
+                        series_id=series_id,
+                        defaults={
+                            'name': name,
+                            'observation_start': None,  # These will be updated by fetch_and_save_metadata
+                            'observation_end': None,
+                            'frequency': '',
+                            'units': '',
+                            'seasonal_adjustment': '',
+                            'notes': '',
+                        }
+                    )
 
-                    fetch_and_save_series(api_key, data_series_instance, data_origin)
+                    # Fetch and save metadata
+                    fetch_and_save_metadata(api_key, series_id, series_instance, data_origin)
+                    self.stdout.write(self.style.SUCCESS(f"{name} metadata downloaded and saved."))
+
+                    # Fetch and save data points
+                    fetch_and_save_series(api_key, series_instance, data_origin)
                     self.stdout.write(self.style.SUCCESS(f"{name} data points updated."))
 
-                elif data_origin == 'custom':
-                    self.stdout.write(f"{name} is not available on FRED. Please implement custom data fetching.")
-                    # Implement custom data fetching logic here
-                    # Example:
-                    # data_series_instance = fetch_and_save_custom_metadata(...)
-                    # fetch_and_save_custom_series(...)
                 else:
                     self.stdout.write(f"Data origin '{data_origin}' not recognized for {name}.")
 
             except Exception as e:
                 self.stderr.write(self.style.ERROR(f"Error processing {name}: {e}"))
-                # Continue with the next indicator
                 continue
 
         self.stdout.write(self.style.SUCCESS("Data seeding completed."))

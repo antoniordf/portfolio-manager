@@ -1,6 +1,6 @@
 import graphene
 from .types import RealGDPType, NominalInflationType, QuadrantDataPointType
-from dashboard.models import RealGDP, NominalInflation
+from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint
 import pandas as pd
 
 class Query(graphene.ObjectType):
@@ -25,13 +25,19 @@ class Query(graphene.ObjectType):
             real_gdp_series = RealGDP.objects.get(series_id='GDPC1')
             inflation_series = NominalInflation.objects.get(series_id='CPIAUCSL')
 
+            # Fetch related data points
+            gdp_data_points = real_gdp_series.economic_data_points.all()
+            inflation_data_points = inflation_series.economic_data_points.all()
+
             # Calculate YoY changes and rates of change for GDP
-            gdp_df = real_gdp_series.calculate_returns(
+            gdp_df = EconomicDataPoint.calculate_returns(
+                gdp_data_points,
                 data_frequency=real_gdp_series.frequency
             )
 
             # Calculate YoY changes and rates of change for Inflation
-            inflation_df = inflation_series.calculate_returns(
+            inflation_df = EconomicDataPoint.calculate_returns(
+                inflation_data_points,
                 data_frequency=inflation_series.frequency
             )
 

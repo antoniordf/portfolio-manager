@@ -1,12 +1,7 @@
 import csv
 from django.db import models
-from dateutil.relativedelta import relativedelta
-from dateutil.relativedelta import relativedelta
-from datetime import timedelta
-from .data_point import DataPoint
 import numpy as np
 from scipy import stats as scipy_stats
-import pandas as pd
 
 # Parent class: Represents the metadata and methods for the time series
 class DataSeries(models.Model):
@@ -20,9 +15,13 @@ class DataSeries(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    
+    DATA_TYPES = (
+        ('economic', 'Economic'),
+        ('financial', 'Financial'),
+    )
+    data_type = models.CharField(max_length=10, choices=DATA_TYPES)
 
-    class Meta:
-        abstract = True
 
     def __str__(self) -> str:
         return self.name
@@ -49,102 +48,139 @@ class DataSeries(models.Model):
         return metadata
 
     def get_time_series(self) -> list:
-        # Returns the entire time series as a sorted list of tuples (date, value)
-        return sorted([(dp.date, dp.value) for dp in self.data_points.all()], key=lambda x: x[0])
-
-    def calculate_returns(self, data_frequency) -> dict:
-        """
-        Calculate the returns for the time series data based on the specified period.
-        Parameters:
-        - data_frequency (str): The frequency of the underlying data (e.g., "Daily", "Monthly", "Yearly").
-        - return_period (str): The period over which to calculate returns (e.g., "daily", "weekly", "monthly", "yearly").
-        """
-        time_series = self.get_time_series()
-        df = pd.DataFrame(time_series, columns=['date', 'value'])
-
-        # Convert 'date' column to datetime
-        df['date'] = pd.to_datetime(df['date'])
-
-        # Set 'date' as the index
-        df.set_index('date', inplace=True)
-        df.sort_index(inplace=True)  # Ensure dates are in order
-
-        # Calculate YoY growth rates
-        if data_frequency == "Monthly":
-            # Calculate YoY growth rates (12 months apart)
-            yoy_returns = df.pct_change(periods=12)
-        elif data_frequency == "Quarterly":
-            # Calculate YoY growth rates (4 quarters apart)
-            yoy_returns = df.pct_change(periods=4)
+        if self.data_type == 'economic':
+            data_points = self.economic_data_points.all()
+            return sorted([(dp.date, dp.value) for dp in data_points], key=lambda x: x[0])
+        elif self.data_type == 'financial':
+            data_points = self.financial_data_points.all()
+            return sorted([(dp.date, dp.close) for dp in data_points], key=lambda x: x[0])
         else:
-            raise ValueError(f"Unsupported data frequency: {data_frequency}")
-
-        # Combine into a single DataFrame
-        result_df = pd.DataFrame({
-            'value': df['value'],
-            'yoy_change': yoy_returns['value'],
-        })
-
-        # Drop NaN values resulting from the calculations
-        result_df.dropna(inplace=True)
-
-        return result_df
+            return []
     
     def get_return_series(self, period) -> list:
         """
         Get the return series for the time series data.
         """
-        return_series = self.calculate_returns(period)
-        return sorted([(date, value) for date, value in return_series.items()], key=lambda x: x[0])
-    
-    def add_data_point(self, date, value) -> None:
-        # Add a new data point to the time series
-        DataPoint.objects.create(date=date, value=value, series=self)
+        if self.data_type == 'economic':
+            from .economic_data_point import EconomicDataPoint
+            data_points = self.economic_data_points.all()
+            # Ensure data_points is ordered by date
+            data_points = data_points.order_by('date')
+            return_series = EconomicDataPoint.calculate_returns(data_points, self.frequency)
+        elif self.data_type == 'financial':
+            from .financial_data_point import FinancialDataPoint
+            data_points = self.financial_data_points.all()
+            # Ensure data_points is ordered by date
+            data_points = data_points.order_by('date')
+            return_series = FinancialDataPoint.calculate_returns(data_points, period)
+        else:
+            return []
 
-    def update_data_point(self, date, new_value) -> None:
-        try:
-            # The self.data_points is a reverse relation queryset to DataPoint objects
-            data_point = self.data_points.get(date=date)
-            data_point.value = new_value
-            data_point.save()
-        except DataPoint.DoesNotExist:
-            raise ValueError(f"No data point exists for the date {date}.")
-        
+        # Return sorted list of tuples (date, return_value)
+        return sorted(return_series.items(), key=lambda x: x[0])
+    
+    def add_data_point(self, date, **kwargs) -> None:
+        if self.data_type == 'economic':
+            from .economic_data_point import EconomicDataPoint
+            if 'value' not in kwargs:
+                raise ValueError("Missing required argument 'value' for economic data point.")
+            EconomicDataPoint.objects.create(series=self, date=date, value=kwargs['value'])
+        elif self.data_type == 'financial':
+            from .financial_data_point import FinancialDataPoint
+            required_fields = ['open', 'high', 'low', 'close', 'volume']
+            missing_fields = [field for field in required_fields if field not in kwargs]
+            if missing_fields:
+                raise ValueError(f"Missing required fields for financial data point: {', '.join(missing_fields)}")
+            FinancialDataPoint.objects.create(
+                series=self,
+                date=date,
+                open=kwargs.get('open'),
+                high=kwargs.get('high'),
+                low=kwargs.get('low'),
+                close=kwargs.get('close'),
+                volume=kwargs.get('volume'),
+            )
+
+    def update_data_point(self, date, **kwargs) -> None:
+        if self.data_type == 'economic':
+            from .economic_data_point import EconomicDataPoint
+            try:
+                data_point = self.economic_data_points.get(date=date)
+                if 'value' not in kwargs:
+                    raise ValueError("Missing required argument 'value' for economic data point.")
+                data_point.value = kwargs['value']
+                data_point.save()
+            except EconomicDataPoint.DoesNotExist:
+                raise ValueError(f"No data point exists for the date {date}.")
+        elif self.data_type == 'financial':
+            from .financial_data_point import FinancialDataPoint
+            try:
+                data_point = self.financial_data_points.get(date=date)
+                for field in ['open', 'high', 'low', 'close', 'volume']:
+                    if field in kwargs:
+                        setattr(data_point, field, kwargs[field])
+                data_point.save()
+            except FinancialDataPoint.DoesNotExist:
+                raise ValueError(f"No data point exists for the date {date}.")
+            
     def count_observations(self) -> int:
-        return self.data_points.count()
+        if self.data_type == 'economic':
+            return self.economic_data_points.count()
+        elif self.data_type == 'financial':
+            return self.financial_data_points.count()
+        else:
+            return 0
     
     def data_point_exists(self, date) -> bool:
-        return self.data_points.filter(date=date).exists()
+        if self.data_type == 'economic':
+            return self.economic_data_points.filter(date=date).exists()
+        elif self.data_type == 'financial':
+            return self.financial_data_points.filter(date=date).exists()
+        else:
+            return False
     
-    def get_latest_data_point(self) -> DataPoint:
-        return self.data_points.latest("date")
+    def get_latest_data_point(self):
+        if self.data_type == 'economic':
+            return self.economic_data_points.latest("date")
+        elif self.data_type == 'financial':
+            return self.financial_data_points.latest("date")
+        else:
+            return None
     
     def calculate_statistics(self) -> dict:
-        # Extract the time series values
-        values = self.get_time_series_values()
+        if self.data_type == 'economic':
+            values = [dp.value for dp in self.economic_data_points.all()]
+        elif self.data_type == 'financial':
+            values = [dp.close for dp in self.financial_data_points.all()]
+        else:
+            return {}
 
         # Handle the case where there are no data points
         if not values:
             return {}
 
+        # Calculate Mode
+        mode_result = scipy_stats.mode(values, nan_policy='omit')
+        mode_value = mode_result.mode[0] if mode_result.count[0] > 0 else None
+
         # Calculate descriptive statistics
         statistics = {
             'mean': np.mean(values),
             'median': np.median(values),
-            'mode': scipy_stats.mode(values)[0][0] if len(values) > 1 else None,
-            'standard_deviation': np.std(values, ddof=1),  # Sample standard deviation
-            'variance': np.var(values, ddof=1),  # Sample variance
+            'mode': mode_value,
+            'standard_deviation': np.std(values, ddof=1),
+            'variance': np.var(values, ddof=1),
             'skewness': scipy_stats.skew(values),
             'kurtosis': scipy_stats.kurtosis(values),
             'minimum': np.min(values),
             'maximum': np.max(values),
-            'range': np.ptp(values),  # Range (max - min)
+            'range': np.ptp(values),
             'count': len(values),
             'sum': np.sum(values),
             '25th_percentile': np.percentile(values, 25),
-            '50th_percentile': np.percentile(values, 50),  # same as median
+            '50th_percentile': np.percentile(values, 50),
             '75th_percentile': np.percentile(values, 75),
-            'interquartile_range': scipy_stats.iqr(values),  # IQR
+            'interquartile_range': scipy_stats.iqr(values),
         }
 
         return statistics
@@ -159,10 +195,16 @@ class DataSeries(models.Model):
         with open(filename, mode="w", newline='') as file:
             writer = csv.writer(file)
             
-            # Write the header
-            writer.writerow(["date", "value"])
-            
-            # Write the data rows
-            for date, value in time_series:
-                writer.writerow([date, value])
+            if self.data_type == 'economic':
+                # Write the header
+                writer.writerow(["date", "value"])
+                # Write the data rows
+                for date, value in time_series:
+                    writer.writerow([date, value])
+            elif self.data_type == 'financial':
+                # For financial data, you may want to include more fields
+                writer.writerow(["date", "open", "high", "low", "close", "volume"])
+                data_points = self.financial_data_points.all().order_by('date')
+                for dp in data_points:
+                    writer.writerow([dp.date, dp.open, dp.high, dp.low, dp.close, dp.volume])
         
