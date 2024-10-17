@@ -3,10 +3,11 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from datetime import datetime
 from rest_framework import status
-from dashboard.models import RealGDP, TreasuryYield, ConcreteDataSeries, NominalInflation, DataPoint, EconomicDataPoint
+from dashboard.models import RealGDP, TreasuryYield, NominalInflation, EconomicDataPoint
 from .utils import fetch_and_save_metadata, fetch_and_save_series
 from django.conf import settings
 import pprint
+import json
 
 api_key = settings.FRED_API_KEY
 
@@ -107,18 +108,19 @@ class FetchDataAPITestCase(TestCase):
         treasury_yields = ["DGS1MO", "DGS3MO", "DGS6MO", "DGS1", "DGS2", "DGS3", "DGS5", "DGS7", "DGS10", "DGS20", "DGS30"]
         
         for asset in treasury_yields:
-            try:
-                # Call the function to retrieve metadata
-                data_series_instance = fetch_and_save_metadata(api_key, asset, TreasuryYield, "fred", data_type='financial')
+            with self.subTest(asset=asset):
+                try:
+                    # Call the function to retrieve metadata
+                    data_series_instance = fetch_and_save_metadata(api_key, asset, TreasuryYield, "fred", data_type='economic')
 
-                # If no instance is returned, fail the test
-                self.assertIsNotNone(data_series_instance, f"Failed to fetch and save metadata for {asset}.")
+                    # If no instance is returned, fail the test
+                    self.assertIsNotNone(data_series_instance, f"Failed to fetch and save metadata for {asset}.")
 
-                # Call the function to download and save the time series
-                fetch_and_save_series(api_key, data_series_instance, "fred")
+                    # Call the function to download and save the time series
+                    fetch_and_save_series(api_key, data_series_instance, "fred")
 
-            except Exception as e:
-                self.fail(f"Test failed for {asset} due to an exception: {e}")
+                except Exception as e:
+                    self.fail(f"Test failed for {asset} due to an exception: {e}")
 
         # After all yields are processed, check that records have been created
         self.assertEqual(TreasuryYield.objects.count(), len(treasury_yields), "Not all treasury yields were saved.")
@@ -126,7 +128,7 @@ class FetchDataAPITestCase(TestCase):
         # Optionally, check specific records or data values
         for asset in treasury_yields:
             series_instance = TreasuryYield.objects.get(series_id=asset)
-            latest_record = series_instance.financial_data_points.latest('date')
+            latest_record = series_instance.economic_data_points.latest('date')
             print(f"Latest Treasury Yield Data for {asset}: {latest_record.date} - {latest_record.value}")
 
 class CalculateReturnsTest(TestCase):
@@ -174,8 +176,14 @@ class CalculateReturnsTest(TestCase):
 
     def test_calculate_returns(self):
         # Call calculate_returns and capture the returned DataFrames
-        gdp_returns_df = self.real_gdp_series.calculate_returns(data_frequency=self.real_gdp_series.frequency)
-        inflation_returns_df = self.inflation_series.calculate_returns(data_frequency=self.inflation_series.frequency)
+        gdp_returns_df = EconomicDataPoint.calculate_returns(
+            self.real_gdp_series.economic_data_points.all(),
+            data_frequency=self.real_gdp_series.frequency
+        )
+        inflation_returns_df = EconomicDataPoint.calculate_returns(
+            self.inflation_series.economic_data_points.all(),
+            data_frequency=self.inflation_series.frequency
+        )
 
         # Print the DataFrames for debugging
         print("\nGDP Returns DataFrame:")
@@ -238,20 +246,44 @@ class QuadrantDataViewTest(TestCase):
             )
 
     def test_quadrant_data_view(self):
-        # Use APIClient to make the request
-        client = APIClient()
+        # Define the GraphQL query
+        graphql_query = """
+        query QuadrantData($startDate: Date, $endDate: Date, $dataPoints: Int) {
+            quadrantData(startDate: $startDate, endDate: $endDate, dataPoints: $dataPoints) {
+                date
+                gdpGrowth
+                inflationGrowth
+            }
+        }
+        """
+         # Define variables for the query
+        variables = {
+            "startDate": "2020-01-01",
+            "endDate": "2024-04-01",
+            "dataPoints": 15
+        }
 
-        # Construct the URL for the QuadrantDataView
-        url = reverse('dashboard:quadrant_data')
-
-        # Send a GET request to the view
-        response = client.get(url)
+        # Send a POST request to the GraphQL endpoint
+        response = self.client.post(
+            '/graphql/',
+            data=json.dumps({
+                "query": graphql_query,
+                "variables": variables
+            }),
+            content_type='application/json'
+        )
 
         # Check that the response status code is 200 OK
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         # Parse the response data
-        data = response.json()
+        response_data = response.json()
+
+         # Check for errors in the GraphQL response
+        if 'errors' in response_data:
+            self.fail(f"GraphQL errors occurred: {response_data['errors']}")
+
+        data = response_data.get('data', {}).get('quadrantData', [])
 
         # Print the output for debugging
         pprint.pprint(data, indent=2)
@@ -310,9 +342,9 @@ class QuadrantDataViewTest(TestCase):
             self.assertIsNotNone(expected_inflation_growth, f"No manual Inflation growth calculation for date {date}")
 
             # Compare with response data, allowing for some floating point tolerance
-            self.assertAlmostEqual(dp['gdp_growth'], expected_gdp_growth * 100, places=4, msg=f"GDP growth mismatch on {date}")
-            print(dp['gdp_growth'], expected_gdp_growth * 100, date)
-            self.assertAlmostEqual(dp['inflation_growth'], expected_inflation_growth * 100, places=4, msg=f"Inflation growth mismatch on {date}")
-            print(dp['inflation_growth'], expected_inflation_growth * 100, date)
+            self.assertAlmostEqual(dp['gdpGrowth'], expected_gdp_growth * 100, places=4, msg=f"GDP growth mismatch on {date}")
+            print(dp['gdpGrowth'], expected_gdp_growth * 100, date)
+            self.assertAlmostEqual(dp['inflationGrowth'], expected_inflation_growth * 100, places=4, msg=f"Inflation growth mismatch on {date}")
+            print(dp['inflationGrowth'], expected_inflation_growth * 100, date)
             
 

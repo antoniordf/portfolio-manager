@@ -1,5 +1,6 @@
 import csv
 from django.db import models
+from django.core.exceptions import ValidationError
 import numpy as np
 from scipy import stats as scipy_stats
 
