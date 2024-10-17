@@ -24,7 +24,7 @@ class DataSeries(models.Model):
     class Meta:
         abstract = True
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
     
     def get_metadata(self) -> dict:
@@ -97,7 +97,7 @@ class DataSeries(models.Model):
         return_series = self.calculate_returns(period)
         return sorted([(date, value) for date, value in return_series.items()], key=lambda x: x[0])
     
-    def add_data_point(self, date, value):
+    def add_data_point(self, date, value) -> None:
         # Add a new data point to the time series
         DataPoint.objects.create(date=date, value=value, series=self)
 

@@ -1,24 +1,25 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+import graphene
+from .types import RealGDPType, NominalInflationType, QuadrantDataPointType
 from dashboard.models import RealGDP, NominalInflation
-from dashboard.serializers import QuadrantDataPointSerializer
-from datetime import datetime
 import pandas as pd
 
-class QuadrantDataView(APIView):
-    def get(self, request):
-        # Optional: get date range from query parameters
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        data_points = 15
+class Query(graphene.ObjectType):
+    real_gdp = graphene.Field(RealGDPType, id=graphene.Int(required=True))
 
-        # Parse dates if provided
-        if start_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-        if end_date:
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+    def resolve_real_gdp(self, info, id):
+        try:
+            return RealGDP.objects.get(id=id)
+        except RealGDP.DoesNotExist:
+            return None
+        
+    quadrant_data = graphene.List(
+        QuadrantDataPointType,
+        start_date=graphene.Date(),
+        end_date=graphene.Date(),
+        data_points=graphene.Int(default_value=15)
+    )
 
+    def resolve_quadrant_data(self, info, start_date=None, end_date=None, data_points=15):
         try:
             # Fetch data series for real GDP and inflation
             real_gdp_series = RealGDP.objects.get(series_id='GDPC1')
@@ -72,21 +73,18 @@ class QuadrantDataView(APIView):
             # Prepare the data
             data = []
             for date, row in combined_df.iterrows():
-                data.append({
-                    'date': date.date(),
-                    'gdp_growth': round(row[('gdp', 'rate_of_change')] * 100, 4),
-                    'inflation_growth': round(row[('inflation', 'rate_of_change')] * 100, 4),
-                })
+                data.append(
+                    QuadrantDataPointType(
+                        date=date.date(),
+                        gdp_growth=round(row[('gdp', 'rate_of_change')] * 100, 4),
+                        inflation_growth=round(row[('inflation', 'rate_of_change')] * 100, 4),
+                    )
+                )
 
-            # Use the serializer to validate and serialize the data
-            serializer = QuadrantDataPointSerializer(data=data, many=True)
-            if serializer.is_valid():
-                return Response(serializer.data, status=status.HTTP_200_OK)
-            else:
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return data
 
         except (RealGDP.DoesNotExist, NominalInflation.DoesNotExist):
-            return Response({'error': 'Data series not found'}, status=status.HTTP_404_NOT_FOUND)
+            return []
         except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        
+            return []
+    
