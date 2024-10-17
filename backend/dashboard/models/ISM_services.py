@@ -7,6 +7,4 @@ class ISMServices(DataSeries):
     A model to represent ISM Services data.
     """
 
-    def save(self, *args, **kwargs):
-        self.data_type = 'economic'
-        super().save(*args, **kwargs)
+    pass

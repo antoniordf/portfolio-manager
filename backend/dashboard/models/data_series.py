@@ -7,8 +7,8 @@ from scipy import stats as scipy_stats
 class DataSeries(models.Model):
     name = models.CharField(max_length=100)
     series_id = models.CharField(max_length=50, unique=True)
-    observation_start = models.DateField()
-    observation_end = models.DateField()
+    observation_start = models.DateField(null=True, blank=True)
+    observation_end = models.DateField(null=True, blank=True)
     frequency = models.CharField(max_length=50)
     units = models.CharField(max_length=100)
     seasonal_adjustment = models.CharField(max_length=100)

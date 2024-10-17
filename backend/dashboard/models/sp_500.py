@@ -7,6 +7,4 @@ class Sp500(DataSeries):
     A model to represent S&P 500 data.
     """
 
-    def save(self, *args, **kwargs):
-        self.data_type = 'financial'
-        super().save(*args, **kwargs)
+    pass

@@ -4,7 +4,7 @@ from django.contrib.contenttypes.models import ContentType
 from .models import EconomicDataPoint, FinancialDataPoint
 from datetime import datetime, timedelta
 
-def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin):
+def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin, data_type):
     """
     Fetches metadata for a given series_id from the specified data source and saves it as an instance of DataSeriesClass.
     
@@ -24,19 +24,28 @@ def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin):
         response.raise_for_status()  # Raises an HTTPError for bad responses
         metadata = parse_metadata(response.json(), data_origin)
         
-        data_series_instance = DataSeriesClass.objects.create(
+         # Use update_or_create to handle existing series_ids
+        data_series_instance, created = DataSeriesClass.objects.update_or_create(
             series_id=metadata['id'],
-            name=metadata['title'],
-            observation_start=metadata['observation_start'],
-            observation_end=metadata['observation_end'],
-            frequency=metadata.get('frequency', 'N/A'),
-            units=metadata.get('units', 'N/A'),
-            seasonal_adjustment=metadata.get('seasonal_adjustment', 'N/A'),
-            last_updated=metadata['last_updated'],
-            notes=metadata.get('notes', ''),
-            data_type='economic' if data_origin == 'fred' else 'financial'  # Adjust as needed
+            defaults={
+                'name': metadata['title'],
+                'observation_start': metadata['observation_start'],
+                'observation_end': metadata['observation_end'],
+                'frequency': metadata.get('frequency', 'N/A'),
+                'units': metadata.get('units', 'N/A'),
+                'seasonal_adjustment': metadata.get('seasonal_adjustment', 'N/A'),
+                'last_updated': metadata['last_updated'],
+                'notes': metadata.get('notes', ''),
+                'data_type': data_type,
+                'metadata': metadata,
+            }
         )
     
+        if created:
+            print(f"Created new DataSeries: {metadata['id']}")
+        else:
+            print(f"Updated existing DataSeries: {metadata['id']}")
+        
         return data_series_instance
     except requests.exceptions.RequestException as e:
         # Handle request errors

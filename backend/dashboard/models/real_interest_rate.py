@@ -7,6 +7,4 @@ class RealInterestRate(DataSeries):
     A model to represent Real Interest Rate data.
     """
 
-    def save(self, *args, **kwargs):
-        self.data_type = 'economic'
-        super().save(*args, **kwargs)
+    pass

@@ -76,15 +76,13 @@ inflation_values = [
 
 class FetchDataAPITestCase(TestCase):
 
-    #Test to download and save GDP data from FRED database
     def test_fetch_and_save_gdp(self):
-
         # Ensure there are no existing records
         self.assertEqual(RealGDP.objects.count(), 0)
         
         try:
             # Call the function to retrieve metadata
-            data_series_instance = fetch_and_save_metadata(api_key, "GDPC1", RealGDP, "fred")
+            data_series_instance = fetch_and_save_metadata(api_key, "GDPC1", RealGDP, "fred", data_type='economic')
 
             # If no instance is returned, fail the test
             self.assertIsNotNone(data_series_instance, "Failed to fetch and save metadata.")
@@ -96,15 +94,13 @@ class FetchDataAPITestCase(TestCase):
             self.assertGreater(RealGDP.objects.count(), 0)
 
             # Optionally, check specific records or data values
-            latest_record = data_series_instance.data_points.latest('date')
+            latest_record = data_series_instance.economic_data_points.latest('date')
             print(f"Latest GDP Data: {latest_record.date} - {latest_record.value}")
 
         except Exception as e:
             self.fail(f"Test failed due to an exception: {e}")
 
-    # Test to download and save treasury yield data from FRED database
     def test_fetch_and_save_treasury_yields(self):
-
         # Ensure there are no existing records
         self.assertEqual(TreasuryYield.objects.count(), 0)
 
@@ -113,114 +109,131 @@ class FetchDataAPITestCase(TestCase):
         for asset in treasury_yields:
             try:
                 # Call the function to retrieve metadata
-                data_series_instance = fetch_and_save_metadata(api_key, asset, TreasuryYield, "fred")
+                data_series_instance = fetch_and_save_metadata(api_key, asset, TreasuryYield, "fred", data_type='financial')
 
                 # If no instance is returned, fail the test
-                self.assertIsNotNone(data_series_instance, "Failed to fetch and save metadata.")
+                self.assertIsNotNone(data_series_instance, f"Failed to fetch and save metadata for {asset}.")
 
                 # Call the function to download and save the time series
                 fetch_and_save_series(api_key, data_series_instance, "fred")
 
-                # Check that data was saved to the database
-                self.assertGreater(TreasuryYield.objects.count(), 0)
-
-                # Optionally, check specific records or data values
-                latest_record = data_series_instance.data_points.latest('date')
-                print(f"Latest Treasury Yield Data: {latest_record.date} - {latest_record.value}")
-
             except Exception as e:
-                self.fail(f"Test failed due to an exception: {e}")
+                self.fail(f"Test failed for {asset} due to an exception: {e}")
+
+        # After all yields are processed, check that records have been created
+        self.assertEqual(TreasuryYield.objects.count(), len(treasury_yields), "Not all treasury yields were saved.")
+
+        # Optionally, check specific records or data values
+        for asset in treasury_yields:
+            series_instance = TreasuryYield.objects.get(series_id=asset)
+            latest_record = series_instance.financial_data_points.latest('date')
+            print(f"Latest Treasury Yield Data for {asset}: {latest_record.date} - {latest_record.value}")
 
 class CalculateReturnsTest(TestCase):
         
-        def test_calculate_returns(self):
-            # Ensure there are no existing records
-            self.assertEqual(ConcreteDataSeries.objects.count(), 0)
-            
-            # Create a new ConcreteDataSeries instance
-            data_series_instance = ConcreteDataSeries.objects.create(name="Test Series")
-    
-            # Create test instances for RealGDP and NominalInflation
-            self.real_gdp_series = RealGDP.objects.create(
-                series_id='GDPC1',
-                name='Real Gross Domestic Product (Test)',
-                observation_start=datetime(2018, 1, 1),
-                observation_end=datetime(2024, 4, 1),
-                frequency='Quarterly',
-                units='Billions of Dollars',
-                last_updated=datetime.now()
-            )
-
-            self.inflation_series = NominalInflation.objects.create(
-                series_id='CPIAUCSL',
-                name='Consumer Price Index for All Urban Consumers (Test)',
-                observation_start=datetime(2018, 1, 1),
-                observation_end=datetime(2024, 9, 1),
-                frequency='Monthly',
-                units='Index 1982-1984=100',
-                last_updated=datetime.now()
-            )
-
-            for date_str, value in zip(gdp_dates, gdp_values):
-                EconomicDataPoint.objects.create(
-                    series=self.real_gdp_series,
-                    date=datetime.strptime(date_str, '%Y-%m-%d'),
-                    value=value
-                )
-
-            for date_str, value in zip(inflation_dates, inflation_values):
-                EconomicDataPoint.objects.create(
-                    series=self.inflation_series,
-                    date=datetime.strptime(date_str, '%Y-%m-%d'),
-                    value=value
-                )
-
-             # Call calculate_returns and capture the returned DataFrames
-            gdp_returns_df = self.real_gdp_series.calculate_returns(data_frequency=self.real_gdp_series.frequency)
-            inflation_returns_df = self.inflation_series.calculate_returns(data_frequency=self.inflation_series.frequency)
-
-            # Print the DataFrames
-            print("\nGDP Returns DataFrame:")
-            print(gdp_returns_df)
-
-            print("\nInflation Returns DataFrame:")
-            print(inflation_returns_df)
-    
-
-class QuadrantDataViewTest(TestCase):
     def setUp(self):
-        # Create test instances for RealGDP and NominalInflation
+        # Create RealGDP instance
         self.real_gdp_series = RealGDP.objects.create(
             series_id='GDPC1',
             name='Real Gross Domestic Product (Test)',
-            observation_start=datetime(2018, 1, 1),
-            observation_end=datetime(2024, 4, 1),
+            observation_start=datetime(2018, 1, 1).date(),
+            observation_end=datetime(2024, 4, 1).date(),
             frequency='Quarterly',
             units='Billions of Dollars',
-            last_updated=datetime.now()
+            seasonal_adjustment='Seasonally Adjusted',
+            data_type='economic'
         )
 
+        # Create NominalInflation instance
         self.inflation_series = NominalInflation.objects.create(
             series_id='CPIAUCSL',
             name='Consumer Price Index for All Urban Consumers (Test)',
-            observation_start=datetime(2018, 1, 1),
-            observation_end=datetime(2024, 9, 1),
+            observation_start=datetime(2018, 1, 1).date(),
+            observation_end=datetime(2024, 9, 1).date(),
             frequency='Monthly',
             units='Index 1982-1984=100',
-            last_updated=datetime.now()
+            seasonal_adjustment='Seasonally Adjusted',
+            data_type='economic'
         )
 
+        # Populate RealGDP data points
         for date_str, value in zip(gdp_dates, gdp_values):
             EconomicDataPoint.objects.create(
                 series=self.real_gdp_series,
-                date=datetime.strptime(date_str, '%Y-%m-%d'),
+                date=datetime.strptime(date_str, '%Y-%m-%d').date(),
                 value=value
             )
 
+        # Populate NominalInflation data points
         for date_str, value in zip(inflation_dates, inflation_values):
             EconomicDataPoint.objects.create(
                 series=self.inflation_series,
-                date=datetime.strptime(date_str, '%Y-%m-%d'),
+                date=datetime.strptime(date_str, '%Y-%m-%d').date(),
+                value=value
+            )
+
+    def test_calculate_returns(self):
+        # Call calculate_returns and capture the returned DataFrames
+        gdp_returns_df = self.real_gdp_series.calculate_returns(data_frequency=self.real_gdp_series.frequency)
+        inflation_returns_df = self.inflation_series.calculate_returns(data_frequency=self.inflation_series.frequency)
+
+        # Print the DataFrames for debugging
+        print("\nGDP Returns DataFrame:")
+        print(gdp_returns_df)
+
+        print("\nInflation Returns DataFrame:")
+        print(inflation_returns_df)
+
+        # Assertions to verify the return calculations are correct
+        # Example: Check that the number of calculated returns matches expected
+        expected_gdp_returns = len(gdp_dates) - 12  # Quarterly data with 12 periods for YoY
+        expected_inflation_returns = len(inflation_dates) - 12  # Monthly data with 12 periods for YoY
+
+        self.assertEqual(len(gdp_returns_df), expected_gdp_returns, "Incorrect number of GDP returns calculated.")
+        self.assertEqual(len(inflation_returns_df), expected_inflation_returns, "Incorrect number of Inflation returns calculated.")    
+
+class QuadrantDataViewTest(TestCase):
+    def setUp(self):
+        # Initialize APIClient
+        self.client = APIClient()
+
+        # Create RealGDP instance
+        self.real_gdp_series = RealGDP.objects.create(
+            series_id='GDPC1',
+            name='Real Gross Domestic Product (Test)',
+            observation_start=datetime(2018, 1, 1).date(),
+            observation_end=datetime(2024, 4, 1).date(),
+            frequency='Quarterly',
+            units='Billions of Dollars',
+            seasonal_adjustment='Seasonally Adjusted',
+            data_type='economic'
+        )
+
+        # Create NominalInflation instance
+        self.inflation_series = NominalInflation.objects.create(
+            series_id='CPIAUCSL',
+            name='Consumer Price Index for All Urban Consumers (Test)',
+            observation_start=datetime(2018, 1, 1).date(),
+            observation_end=datetime(2024, 9, 1).date(),
+            frequency='Monthly',
+            units='Index 1982-1984=100',
+            seasonal_adjustment='Seasonally Adjusted',
+            data_type='economic'
+        )
+
+        # Populate RealGDP data points
+        for date_str, value in zip(gdp_dates, gdp_values):
+            EconomicDataPoint.objects.create(
+                series=self.real_gdp_series,
+                date=datetime.strptime(date_str, '%Y-%m-%d').date(),
+                value=value
+            )
+
+        # Populate NominalInflation data points
+        for date_str, value in zip(inflation_dates, inflation_values):
+            EconomicDataPoint.objects.create(
+                series=self.inflation_series,
+                date=datetime.strptime(date_str, '%Y-%m-%d').date(),
                 value=value
             )
 

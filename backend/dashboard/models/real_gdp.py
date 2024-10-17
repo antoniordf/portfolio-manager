@@ -8,6 +8,4 @@ class RealGDP(DataSeries):
     A model to represent real GDP data.
     """
 
-    def save(self, *args, **kwargs):
-        self.data_type = 'economic'
-        super().save(*args, **kwargs)
+    pass
