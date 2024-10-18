@@ -16,6 +16,13 @@ class DataSeries(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+
+    DATA_ORIGINS = (
+        ('fred', 'FRED'),
+        ('polygon', 'Polygon.io'),
+    )
+
+    data_origin = models.CharField(max_length=20, choices=DATA_ORIGINS)
     
     DATA_TYPES = (
         ('economic', 'Economic'),
@@ -140,7 +147,7 @@ class DataSeries(models.Model):
         else:
             return False
     
-    def get_latest_data_point(self):
+    def get_latest_data_point(self) -> object:
         if self.data_type == 'economic':
             return self.economic_data_points.latest("date")
         elif self.data_type == 'financial':
