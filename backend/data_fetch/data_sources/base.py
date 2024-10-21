@@ -132,11 +132,10 @@ class DataFetcher(ABC):
 
         end_date = datetime.today().strftime('%Y-%m-%d')
         try:
-            series_data = self.fetch_series_data(data_series_instance.series_id, start_date, end_date)
-            observations = self.parse_series_data(series_data)
+            observations = self.fetch_series_data(data_series_instance.series_id, start_date, end_date)
         except Exception as e:
-            logger.error(f"Failed to parse series data for {data_series_instance.series_id}: {e}")
-            raise  # Re-raise the exception to be handled by the calling task
+            logger.error(f"Failed to fetch or parse series data for {data_series_instance.series_id}: {e}")
+            raise  # Re-raise the exception to be handled by the Celery task
 
         # Prepare data points
         data_points_to_create = []

@@ -1,5 +1,8 @@
 from .base import DataFetcher
 from typing import Dict, Any, List
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FREDFetcher(DataFetcher):
     """
@@ -31,5 +34,39 @@ class FREDFetcher(DataFetcher):
         }
 
     def parse_series_data(self, response_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if not isinstance(response_json, dict):
+            logger.error(f"Unexpected response type: {type(response_json).__name__}. Response content: {response_json}")
+            raise ValueError("Expected response_json to be a dictionary.")
+        
         observations = response_json.get('observations', [])
-        return [{'date': obs['date'], 'value': obs['value']} for obs in observations]
+        if not isinstance(observations, list):
+            logger.error(f"Unexpected 'observations' type: {type(observations).__name__}. Response content: {response_json}")
+            raise ValueError("Expected 'observations' to be a list.")
+        
+        parsed_data = []
+        required_keys = ['date', 'value']
+        
+        for obs in observations:
+            if not all(key in obs for key in required_keys):
+                logger.error(f"Missing required keys in observation: {obs}")
+                raise ValueError("Missing required keys in observation.")
+            
+            date_str = obs['date']
+            value_str = obs['value']
+            
+            if value_str in ('', None):
+                logger.error(f"Missing value for observation on {date_str}: {obs}")
+                raise ValueError("Missing value in observation.")
+            
+            try:
+                value = float(value_str)
+            except ValueError as e:
+                logger.error(f"Invalid value for observation on {date_str}: {value_str}")
+                raise ValueError("Invalid value in observation.") from e
+            
+            parsed_data.append({
+                'date': date_str,
+                'value': value
+            })
+        
+        return parsed_data
