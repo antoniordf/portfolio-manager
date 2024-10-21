@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 import requests
-from django.conf import settings
 from dashboard.models import DataSeries, EconomicDataPoint, FinancialDataPoint
 from datetime import datetime, timedelta
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,23 @@ class DataFetcher(ABC):
         """
         pass
 
+    def make_request_with_backoff(self, url: str, params: Dict[str, Any] = None, max_retries: int = 5, backoff_factor: float = 0.3) -> requests.Response:
+        """
+        Make an HTTP GET request with exponential backoff.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.get(url, params=params, timeout=10)
+                response.raise_for_status()
+                return response
+            except requests.RequestException as e:
+                if attempt == max_retries:
+                    logger.error(f"Max retries exceeded for URL: {url}")
+                    raise
+                sleep_time = backoff_factor * (2 ** (attempt - 1))
+                logger.warning(f"Request failed (Attempt {attempt}/{max_retries}): {e}. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+
     def save_metadata(self, series_id: str, data_type: str, data_origin: str) -> DataSeries:
         """
         Fetch and save metadata for a series.
@@ -76,9 +93,13 @@ class DataFetcher(ABC):
             logger.info(f"Updated existing DataSeries: {metadata['id']}")
         return data_series_instance
 
-    def save_series_data(self, data_series_instance: DataSeries):
+    def save_series_data(self, data_series_instance: DataSeries, initial_fetch: bool = False):
         """
         Fetch and save series data for a DataSeries instance.
+        
+        Args:
+            data_series_instance (DataSeries): The DataSeries instance.
+            initial_fetch (bool): If True, fetch a limited historical range (e.g., last 5 years).
         """
         data_type = data_series_instance.data_type
         if data_type == 'economic':
@@ -89,73 +110,48 @@ class DataFetcher(ABC):
             logger.error(f"Unknown data_type: {data_type} for series_id: {data_series_instance.series_id}")
             raise ValueError(f"Unknown data_type: {data_type}")
 
-        # Determine the last date of existing data
-        last_data_point = data_point_model.objects.filter(series=data_series_instance).order_by('-date').first()
-        if last_data_point:
-            last_date = last_data_point.date
-            start_date = (last_date + timedelta(days=1)).strftime('%Y-%m-%d')
+        if initial_fetch:
+            # Define the start_date as 5 years ago from today
+            start_date = (datetime.today() - timedelta(days=5*365)).strftime('%Y-%m-%d')
+            logger.info(f"Initial fetch for series {data_series_instance.series_id} starting from {start_date}")
         else:
-            # Use observation_start or a default date
-            if data_series_instance.observation_start:
-                start_date = data_series_instance.observation_start.strftime('%Y-%m-%d')
+            # Determine the last date of existing data
+            last_data_point = data_point_model.objects.filter(series=data_series_instance).order_by('-date').first()
+            if last_data_point:
+                last_date = last_data_point.date
+                start_date = (last_date + timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"Fetching new data for series {data_series_instance.series_id} starting from {start_date}")
             else:
-                start_date = '2000-01-01'
+                # Use observation_start or a default date
+                if data_series_instance.observation_start:
+                    start_date = data_series_instance.observation_start.strftime('%Y-%m-%d')
+                    logger.info(f"No existing data found. Fetching from observation_start {start_date}")
+                else:
+                    start_date = '2000-01-01'
+                    logger.info(f"No observation_start found. Fetching from default date {start_date}")
 
         end_date = datetime.today().strftime('%Y-%m-%d')
         try:
             series_data = self.fetch_series_data(data_series_instance.series_id, start_date, end_date)
             observations = self.parse_series_data(series_data)
-        except requests.RequestException as e:
-            logger.error(f"Error fetching series data for {data_series_instance.series_id}: {e}")
-            raise
+        except Exception as e:
+            logger.error(f"Failed to parse series data for {data_series_instance.series_id}: {e}")
+            raise  # Re-raise the exception to be handled by the calling task
 
         # Prepare data points
         data_points_to_create = []
         for obs in observations:
-            date_str = obs['date']
-            try:
-                date = datetime.strptime(date_str, '%Y-%m-%d').date()
-            except ValueError as e:
-                logger.error(f"Invalid date format for series {data_series_instance.series_id}: {date_str}")
-                continue
-
-            if data_type == 'economic':
-                value_str = obs.get('value', '')
-                if value_str in ('', None):
-                    continue
-                try:
-                    value = float(value_str)
-                except ValueError:
-                    logger.warning(f"Non-numeric value for series {data_series_instance.series_id} on {date}: {value_str}")
-                    continue
-                data_points_to_create.append(
-                    EconomicDataPoint(
-                        series=data_series_instance,
-                        date=date,
-                        value=value
-                    )
+            data_points_to_create.append(
+                data_point_model(
+                    series=data_series_instance,
+                    date=obs['date'],
+                    open=obs.get('open'),
+                    high=obs.get('high'),
+                    low=obs.get('low'),
+                    close=obs.get('close'),
+                    volume=obs.get('volume')
                 )
-            elif data_type == 'financial':
-                try:
-                    open_price = float(obs.get('open', 0))
-                    high_price = float(obs.get('high', 0))
-                    low_price = float(obs.get('low', 0))
-                    close_price = float(obs.get('close', 0))
-                    volume = int(obs.get('volume', 0))
-                except (ValueError, TypeError) as e:
-                    logger.error(f"Error parsing financial data for {data_series_instance.series_id} on {date}: {e}")
-                    continue
-                data_points_to_create.append(
-                    FinancialDataPoint(
-                        series=data_series_instance,
-                        date=date,
-                        open=open_price,
-                        high=high_price,
-                        low=low_price,
-                        close=close_price,
-                        volume=volume
-                    )
-                )
+            )
 
         # Bulk create to minimize database hits
         if data_points_to_create:
@@ -164,5 +160,6 @@ class DataFetcher(ABC):
                 logger.info(f"Saved {len(data_points_to_create)} data points for {data_series_instance.series_id}")
             except Exception as e:
                 logger.error(f"Error bulk creating data points for {data_series_instance.series_id}: {e}")
+                raise  # Re-raise to ensure the task is aware of the failure
         else:
             logger.info(f"No new data points to save for {data_series_instance.series_id}")

@@ -3,59 +3,22 @@ from django.conf import settings
 from .data_sources.fetcher_manager import FetcherManager
 from dashboard.models import DataSeries
 from typing import List, Dict
-from django.db import transaction
 import logging
 
 logger = logging.getLogger(__name__)
 
-@shared_task
-def fetch_and_store_multiple_series(data_series_list: List[Dict[str, str]]):
-    """
-    Celery task to fetch and store metadata and series data for multiple DataSeries.
-    
-    Args:
-        data_series_list (List[Dict[str, str]]): A list of dictionaries, each containing:
-            - 'series_id': The unique identifier for the data series (e.g., ticker symbol).
-            - 'data_origin': The source of the data (e.g., 'fred', 'polygon').
-            - 'data_type': The type of data ('economic' or 'financial').
-    """
-    # Extract series_ids from the list
-    series_ids = [item['series_id'] for item in data_series_list]
-    
-    # Fetch existing DataSeries from the database
-    existing_series = DataSeries.objects.filter(series_id__in=series_ids)
-    existing_series_dict = {series.series_id: series for series in existing_series}
-    
-    # Determine which series are new
-    new_series = [item for item in data_series_list if item['series_id'] not in existing_series_dict]
-    
-    # Process existing series
-    for series in existing_series:
-        try:
-            fetcher = FetcherManager.get_fetcher(series.data_origin, get_api_key(series.data_origin))
-            fetcher.save_series_data(series)
-        except Exception as e:
-            logger.error(f"Failed to fetch and save data for existing series {series.series_id}: {e}")
-            continue
-    
-    # Process new series
-    if new_series:
-        # Prepare metadata fetching
-        for item in new_series:
-            series_id = item['series_id']
-            data_origin = item['data_origin']
-            data_type = item['data_type']
-            try:
-                fetcher = FetcherManager.get_fetcher(data_origin, get_api_key(data_origin))
-                data_series_instance = fetcher.save_metadata(series_id, data_type, data_origin)
-                fetcher.save_series_data(data_series_instance)
-            except Exception as e:
-                logger.error(f"Failed to fetch and save data for new series {series_id}: {e}")
-                continue
-
 def get_api_key(data_origin: str) -> str:
     """
     Retrieve the API key based on data origin.
+
+    Args:
+        data_origin (str): The data origin ('fred' or 'polygon').
+
+    Returns:
+        str: The corresponding API key.
+
+    Raises:
+        ValueError: If no API key is found for the given data origin.
     """
     api_keys = {
         'fred': settings.FRED_API_KEY,
@@ -66,3 +29,52 @@ def get_api_key(data_origin: str) -> str:
     if not api_key:
         raise ValueError(f"No API key found for data origin: {data_origin}")
     return api_key
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def fetch_and_store_multiple_series(self, data_series_list: List[Dict[str, str]]):
+    """
+    Celery task to fetch and store metadata and series data for multiple DataSeries.
+
+    Args:
+        data_series_list (List[Dict[str, str]]): A list of dictionaries, each containing:
+            - 'series_id': The unique identifier for the data series (e.g., ticker symbol).
+            - 'data_origin': The source of the data (e.g., 'fred', 'polygon').
+            - 'data_type': The type of data ('economic' or 'financial').
+    """
+    for item in data_series_list:
+        series_id = item.get('series_id')
+        data_origin = item.get('data_origin')
+        data_type = item.get('data_type')
+
+        if not all([series_id, data_origin, data_type]):
+            logger.error(f"Missing data for series: {item}")
+            continue
+
+        try:
+            # Fetch API key based on data_origin
+            api_key = get_api_key(data_origin)
+
+            # Check if the series already exists
+            try:
+                series_instance = DataSeries.objects.get(series_id=series_id)
+                logger.info(f"Processing existing series: {series_id}")
+                fetcher = FetcherManager.get_fetcher(data_origin, api_key)
+                fetcher.save_series_data(series_instance)
+                logger.info(f"Successfully updated series: {series_id}")
+            except DataSeries.DoesNotExist:
+                logger.info(f"Processing new series: {series_id}")
+                fetcher = FetcherManager.get_fetcher(data_origin, api_key)
+                # Save metadata and create DataSeries instance
+                series_instance = fetcher.save_metadata(series_id, data_type, data_origin)
+                # Fetch and save series data with initial_fetch=True
+                fetcher.save_series_data(series_instance, initial_fetch=True)
+                logger.info(f"Successfully created and populated series: {series_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to process series {series_id}: {e}")
+            # Retry the task for transient errors
+            try:
+                self.retry(exc=e)
+            except self.MaxRetriesExceededError:
+                logger.error(f"Max retries exceeded for series {series_id}")
+            continue

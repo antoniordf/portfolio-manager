@@ -1,93 +1,65 @@
 from django.core.management.base import BaseCommand
-from dashboard.utils import fetch_and_save_metadata, fetch_and_save_series
-from django.conf import settings
-from django.db import connection
-from dashboard.models.real_gdp import RealGDP
-from dashboard.models.corporate_bond_spread import CorporateBondSpread
-from dashboard.models.fed_funds_rate import FedFundsRate
-from dashboard.models.ISM_manufacturing import ISMManufacturing
-from dashboard.models.ISM_services import ISMServices
-from dashboard.models.nominal_inflation import NominalInflation
-from dashboard.models.sp_500 import Sp500
-from dashboard.models.treasury_yield import TreasuryYield
-from dashboard.models.vix import VIX
+from data_fetch.tasks import fetch_and_store_multiple_series
+from typing import List, Dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
-    help = 'Seeds the database with initial data for macroeconomic indicators.'
+    help = 'Seeds the database with initial data for macroeconomic and financial indicators.'
 
     def handle(self, *args, **kwargs):
-        api_key = settings.FRED_API_KEY
-
-        # List of indicators with their FRED series IDs and corresponding model classes
-        indicators = [
+        # Define the list of indicators with their series IDs, data origins, and data types
+        data_series_list: List[Dict[str, str]] = [
+            # FRED Economic Indicators
             {
-                'name': 'Real GDP',
                 'series_id': 'GDPC1',
-                'model': RealGDP,
                 'data_origin': 'fred',
                 'data_type': 'economic',
             },
             {
-                'name': 'Federal Funds Rate',
                 'series_id': 'FEDFUNDS',
-                'model': FedFundsRate,
                 'data_origin': 'fred',
                 'data_type': 'economic',
             },
             {
-                'name': 'Nominal Inflation (CPI)',
                 'series_id': 'CPIAUCSL',
-                'model': NominalInflation,
                 'data_origin': 'fred',
                 'data_type': 'economic',
             },
             {
-                'name': '10-Year Treasury Yield',
                 'series_id': 'GS10',
-                'model': TreasuryYield,
                 'data_origin': 'fred',
                 'data_type': 'economic',
             },
             {
-                'name': '2-Year Treasury Yield',
                 'series_id': 'GS2',
-                'model': TreasuryYield,
                 'data_origin': 'fred',
                 'data_type': 'economic',
             },
-            # Add other indicators as needed
+            # Add other FRED indicators as needed
+
+            # Polygon.io Financial Indicators
+            {
+                'series_id': 'AAPL',
+                'data_origin': 'polygon',
+                'data_type': 'financial',
+            },
+            {
+                'series_id': 'MSFT',
+                'data_origin': 'polygon',
+                'data_type': 'financial',
+            },
+            # Add more Polygon.io series as needed
         ]
 
-        for indicator in indicators:
-            name = indicator['name']
-            series_id = indicator['series_id']
-            model_class = indicator['model']
-            data_origin = indicator['data_origin']
-            data_type = indicator['data_type']
+        total_series = len(data_series_list)
+        self.stdout.write(f"Preparing to seed {total_series} data series...")
 
-            self.stdout.write(f"Processing {name}...")
-
-            try:
-                # Fetch and save metadata
-                series_instance = fetch_and_save_metadata(
-                    api_key=api_key,
-                    series_id=series_id,
-                    DataSeriesClass=model_class,
-                    data_origin=data_origin,
-                    data_type=data_type
-                )
-                self.stdout.write(self.style.SUCCESS(f"{name} metadata downloaded and saved."))
-
-                # Fetch and save data points
-                fetch_and_save_series(
-                    api_key=api_key,
-                    data_series_instance=series_instance,
-                    data_origin=data_origin
-                )
-                self.stdout.write(self.style.SUCCESS(f"{name} data points updated."))
-
-            except Exception as e:
-                self.stderr.write(self.style.ERROR(f"Error processing {name}: {e}"))
-                continue
-
-        self.stdout.write(self.style.SUCCESS("Data seeding completed."))
+        try:
+            # Trigger the Celery task to process the series
+            fetch_and_store_multiple_series.delay(data_series_list)
+            self.stdout.write(self.style.SUCCESS("Data fetching tasks have been successfully triggered."))
+        except Exception as e:
+            logger.error(f"Error triggering data fetching tasks: {e}")
+            self.stderr.write(self.style.ERROR(f"Error triggering data fetching tasks: {e}"))
