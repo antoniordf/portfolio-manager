@@ -1,6 +1,11 @@
 from graphene_django import DjangoObjectType
-from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint
+from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint, FinancialDataPoint
 import graphene
+
+class FinancialDataPointType(DjangoObjectType):
+    class Meta:
+        model = FinancialDataPoint
+        fields = '__all__'
 
 class EconomicDataPointType(DjangoObjectType):
     class Meta:

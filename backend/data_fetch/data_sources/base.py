@@ -175,6 +175,9 @@ class DataFetcher(ABC):
             try:
                 data_point_model.objects.bulk_create(data_points_to_create, ignore_conflicts=True)
                 logger.info(f"Saved {len(data_points_to_create)} data points for {data_series_instance.series_id}")
+
+                # Explicitly update `last_updated` to trigger cache invalidation
+                data_series_instance.save()
             except Exception as e:
                 logger.error(f"Error bulk creating data points for {data_series_instance.series_id}: {e}")
                 raise  # Re-raise to ensure the task is aware of the failure

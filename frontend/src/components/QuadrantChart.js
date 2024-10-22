@@ -35,6 +35,7 @@ function QuadrantChart() {
     data: queryData,
   } = useQuery(GET_QUADRANT_DATA, {
     variables: { dataPoints: 15 },
+    fetchPolicy: "cache-first",
   });
 
   useEffect(() => {
