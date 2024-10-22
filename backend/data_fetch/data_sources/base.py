@@ -131,6 +131,14 @@ class DataFetcher(ABC):
                     logger.info(f"No observation_start found. Fetching from default date {start_date}")
 
         end_date = datetime.today().strftime('%Y-%m-%d')
+
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        if start_dt > end_dt:
+            logger.warning(f"Start date {start_date} is after end date {end_date} for series {data_series_instance.series_id}. \
+                           The series is already up to date. Skipping fetch.")
+            return
+    
         try:
             observations = self.fetch_series_data(data_series_instance.series_id, start_date, end_date)
         except Exception as e:
@@ -139,18 +147,28 @@ class DataFetcher(ABC):
 
         # Prepare data points
         data_points_to_create = []
-        for obs in observations:
-            data_points_to_create.append(
-                data_point_model(
-                    series=data_series_instance,
-                    date=obs['date'],
-                    open=obs.get('open'),
-                    high=obs.get('high'),
-                    low=obs.get('low'),
-                    close=obs.get('close'),
-                    volume=obs.get('volume')
+        if data_type == 'financial':
+            for obs in observations:
+                data_points_to_create.append(
+                    FinancialDataPoint(
+                        series=data_series_instance,
+                        date=obs['date'],
+                        open=obs.get('open'),
+                        high=obs.get('high'),
+                        low=obs.get('low'),
+                        close=obs.get('close'),
+                        volume=obs.get('volume')
+                    )
                 )
-            )
+        elif data_type == 'economic':
+            for obs in observations:
+                data_points_to_create.append(
+                    EconomicDataPoint(
+                        series=data_series_instance,
+                        date=obs['date'],
+                        value=obs.get('value')
+                    )
+                )
 
         # Bulk create to minimize database hits
         if data_points_to_create:
