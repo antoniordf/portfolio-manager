@@ -1,6 +1,7 @@
 from .corporate_bond_spread import CorporateBondSpread
-from .data_point import DataPoint
 from .data_series import DataSeries
+from .economic_data_point import EconomicDataPoint
+from .financial_data_point import FinancialDataPoint
 from .fed_funds_rate import FedFundsRate
 from .ISM_manufacturing import ISMManufacturing
 from .ISM_services import ISMServices
@@ -9,5 +10,4 @@ from .real_gdp import RealGDP
 from .real_interest_rate import RealInterestRate
 from .sp_500 import Sp500
 from .vix import VIX
-from .concrete_data_series import ConcreteDataSeries
 from .treasury_yield import TreasuryYield

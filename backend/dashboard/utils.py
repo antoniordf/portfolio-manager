@@ -1,10 +1,10 @@
 import requests
 from .models import DataSeries
 from django.contrib.contenttypes.models import ContentType
-from .models import DataPoint
+from .models import EconomicDataPoint, FinancialDataPoint
 from datetime import datetime, timedelta
 
-def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin):
+def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin, data_type):
     """
     Fetches metadata for a given series_id from the specified data source and saves it as an instance of DataSeriesClass.
     
@@ -24,17 +24,27 @@ def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin):
         response.raise_for_status()  # Raises an HTTPError for bad responses
         metadata = parse_metadata(response.json(), data_origin)
         
-        data_series_instance = DataSeriesClass.objects.create(
+         # Use update_or_create to handle existing series_ids
+        data_series_instance, created = DataSeriesClass.objects.update_or_create(
             series_id=metadata['id'],
-            name=metadata['title'],
-            observation_start=metadata['observation_start'],
-            observation_end=metadata['observation_end'],
-            frequency=metadata.get('frequency', 'N/A'),
-            units=metadata.get('units', 'N/A'),
-            seasonal_adjustment=metadata.get('seasonal_adjustment', 'N/A'),
-            last_updated=metadata['last_updated'],
-            notes=metadata.get('notes', '')
+            defaults={
+                'name': metadata['title'],
+                'observation_start': metadata['observation_start'],
+                'observation_end': metadata['observation_end'],
+                'frequency': metadata.get('frequency', 'N/A'),
+                'units': metadata.get('units', 'N/A'),
+                'seasonal_adjustment': metadata.get('seasonal_adjustment', 'N/A'),
+                'last_updated': metadata['last_updated'],
+                'notes': metadata.get('notes', ''),
+                'data_type': data_type,
+                'metadata': metadata,
+            }
         )
+    
+        if created:
+            print(f"Created new DataSeries: {metadata['id']}")
+        else:
+            print(f"Updated existing DataSeries: {metadata['id']}")
         
         return data_series_instance
     except requests.exceptions.RequestException as e:
@@ -55,43 +65,59 @@ def fetch_and_save_series(api_key, data_series_instance, data_origin):
     - None
     """
     # Check if there is existing data in the database
-    if data_series_instance.data_points.exists():
-        last_date = data_series_instance.data_points.latest('date').date
+    if data_series_instance.data_type == 'economic':
+        data_point_model = EconomicDataPoint
+    elif data_series_instance.data_type == 'financial':
+        data_point_model = FinancialDataPoint
+    else:
+        raise ValueError(f"Unknown data_type: {data_series_instance.data_type}")
+
+    # Check if there is existing data in the database
+    if data_point_model.objects.filter(series=data_series_instance).exists():
+        last_date = data_point_model.objects.filter(series=data_series_instance).latest('date').date
     else:
         last_date = None
-    
+
     url = construct_series_url(api_key, data_series_instance.series_id, data_origin)
-    
+
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Raises an HTTPError for bad responses
+        response.raise_for_status()
         observations = parse_series_data(response.json(), data_origin)
 
-        content_type = ContentType.objects.get_for_model(data_series_instance)
-        
         for observation in observations:
             date_str = observation['date']
             date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    
-            if last_date and date <= last_date:
-            # Skip data points that are already present
-                continue
-            
-            value = observation['value']
-            try:
-                value = float(value)
-            except ValueError:
-                # print(f"Skipping non-numeric value '{value}' on {date}")
-                continue  # Skip this observation if it can't be converted to float
 
-            DataPoint.objects.create(
-                content_type=content_type,
-                object_id=data_series_instance.id,
-                date=date,
-                value=value
-            )
+            if last_date and date <= last_date:
+                continue
+
+            if data_series_instance.data_type == 'economic':
+                value = observation['value']
+                try:
+                    value = float(value)
+                except ValueError:
+                    continue  # Skip non-numeric values
+
+                data_point_model.objects.create(
+                    series=data_series_instance,
+                    date=date,
+                    value=value
+                )
+
+            elif data_series_instance.data_type == 'financial':
+                # Assuming observation contains 'open', 'high', 'low', 'close', 'volume'
+                data_point_model.objects.create(
+                    series=data_series_instance,
+                    date=date,
+                    open=float(observation.get('open', 0)),
+                    high=float(observation.get('high', 0)),
+                    low=float(observation.get('low', 0)),
+                    close=float(observation.get('close', 0)),
+                    volume=int(observation.get('volume', 0))
+                )
+
     except requests.exceptions.RequestException as e:
-        # Handle request errors
         print(f"Error fetching series data: {e}")
         raise
 

@@ -1,9 +1,10 @@
-from django.contrib.contenttypes.fields import GenericRelation
+from django.db import models
 from .data_series import DataSeries
-from .data_point import DataPoint
+from .economic_data_point import EconomicDataPoint
 
 class NominalInflation(DataSeries):
     """
     A model to represent Nominal Inflation data.
     """
-    data_points = GenericRelation(DataPoint)
+
+    pass

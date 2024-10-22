@@ -1,6 +1,5 @@
 from django.contrib import admin
-from .models import RealGDP, TreasuryYield, DataSeries, DataPoint
+from .models import RealGDP, TreasuryYield
 
-admin.site.register(DataPoint)
 admin.site.register(RealGDP)
 admin.site.register(TreasuryYield)
