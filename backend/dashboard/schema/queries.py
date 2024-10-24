@@ -3,6 +3,7 @@ from .types import RealGDPType, NominalInflationType, QuadrantDataPointType, Fin
 from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint, FinancialDataPoint
 import pandas as pd
 from django.core.cache import cache
+import datetime
 
 class Query(graphene.ObjectType):
     real_gdp = graphene.Field(RealGDPType, id=graphene.Int(required=True))
@@ -38,7 +39,11 @@ class Query(graphene.ObjectType):
             # Attempt to retrieve from cache
             cached_data = cache.get(cache_key)
             if cached_data:
-                return cached_data
+                return [QuadrantDataPointType(
+                    date=datetime.datetime.strptime(item['date'], '%Y-%m-%d').date(),
+                    gdp_growth=item['gdp_growth'],
+                    inflation_growth=item['inflation_growth']
+                ) for item in cached_data]
 
             # Fetch related data points
             gdp_data_points = real_gdp_series.economic_data_points.all()
@@ -82,6 +87,9 @@ class Query(graphene.ObjectType):
             # Combine the DataFrames
             combined_df = pd.concat([gdp_df, inflation_df_aligned], axis=1, keys=['gdp', 'inflation'])
 
+            # Flatten the MultiIndex columns
+            combined_df.columns = ['_'.join(col).strip() for col in combined_df.columns.values]
+
             # Apply date range filtering
             if start_date:
                 combined_df = combined_df[combined_df.index.date >= start_date]
@@ -94,18 +102,21 @@ class Query(graphene.ObjectType):
             # Prepare the data
             data = []
             for date, row in combined_df.iterrows():
-                data.append(
-                    QuadrantDataPointType(
-                        date=date.date(),
-                        gdp_growth=round(row[('gdp', 'rate_of_change')] * 100, 4),
-                        inflation_growth=round(row[('inflation', 'rate_of_change')] * 100, 4),
-                    )
-                )
+                data.append({
+                    'date': date.date().isoformat(),
+                    'gdpGrowth': round(row['gdp_rate_of_change'] * 100, 4),
+                    'inflationGrowth': round(row['inflation_rate_of_change'] * 100, 4),
+                })
 
             # Cache the data with no timeout, since cache key includes last_updated
             cache.set(cache_key, data, timeout=None)
-            
-            return data
+
+            # Return the data as QuadrantDataPointType instances
+            return [QuadrantDataPointType(
+                date=datetime.datetime.strptime(item['date'], '%Y-%m-%d').date(),
+                gdp_growth=item['gdpGrowth'],
+                inflation_growth=item['inflationGrowth']
+            ) for item in data]
 
         except (RealGDP.DoesNotExist, NominalInflation.DoesNotExist):
             return []

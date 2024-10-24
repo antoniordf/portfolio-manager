@@ -1,10 +1,4 @@
 import graphene
-import dashboard.schema 
-
-class Query(
-    dashboard.schema.Query,
-    graphene.ObjectType,  # Add other app queries here
-):
-    pass
+from dashboard.schema import Query
 
 schema = graphene.Schema(query=Query)
