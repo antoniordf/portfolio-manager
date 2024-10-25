@@ -218,7 +218,6 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         )
 
         # Check the response status code
-        print(response.content.decode('utf-8'))
         self.assertEqual(response.status_code, 200, msg=f"Expected status code 200, got {response.status_code}")
 
         # Parse the JSON response
@@ -412,7 +411,7 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         variables = {
             'startDate': '2015-01-01',
             'endDate': '2021-01-01',
-            'dataPoints': 10
+            'dataPoints': 20
         }
         
         # Simulate a cache miss by ensuring the cache is empty
@@ -441,7 +440,6 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         )
 
         # Check the response status code
-        print(response.content.decode('utf-8'))
         self.assertEqual(response.status_code, 200, msg=f"Expected status code 200, got {response.status_code}")
 
         # Parse the JSON response
@@ -452,11 +450,14 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
 
         # Verify data is fetched from the database and cached
         fetched_data = content['data']['quadrantData']
-        self.assertEqual(len(fetched_data), 4)
-        # Additional assertions can be added here based on expected values
+        # When calculating YoY changes on quarterly GDP data, we lose 4 data points. 
+        # We lose one additional data point when calculating the rate of change.
+        self.assertEqual(len(fetched_data), variables['dataPoints'] - 5)
 
         # Verify cache is populated
         cached_data = cache.get(cache_key)
         self.assertIsNotNone(cached_data, msg="Data was not cached after cache miss.")
         # Ensure cached data matches fetched data
-        self.assertEqual(len(cached_data), 4)
+        # When calculating YoY changes on quarterly GDP data, we lose 4 data points. 
+        # We lose one additional data point when calculating the rate of change.
+        self.assertEqual(len(cached_data), variables['dataPoints'] - 5)
