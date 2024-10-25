@@ -131,7 +131,7 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         '''
         variables = {
             'startDate': '2015-01-01',
-            'endDate': '2020-01-01',
+            'endDate': '2021-01-01',
             'dataPoints': 20
         }
 
@@ -152,7 +152,6 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         )
 
         # Check the response status code
-        print(response.content.decode('utf-8'))
         self.assertEqual(response.status_code, 200, msg=f"Expected status code 200, got {response.status_code}")
 
         # Parse the JSON response
@@ -164,13 +163,14 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         # Verify data is returned correctly
         self.assertIn('data', content, msg="Response does not contain 'data'")
         self.assertIn('quadrantData', content['data'], msg="Response data does not contain 'quadrantData'")
-        self.assertEqual(len(content['data']['quadrantData']), variables['dataPoints'])
-        # Additional assertions can be added here based on expected values
+        # When calculating YoY changes on quarterly GDP data, we lose 4 data points. 
+        # We lose one additional data point when calculating the rate of change.
+        self.assertEqual(len(content['data']['quadrantData']), variables['dataPoints'] - 5)
 
         # Verify that data is now cached
         cached_data = cache.get(cache_key)
         self.assertIsNotNone(cached_data, msg="Data was not cached after cache miss.")
-        self.assertEqual(len(cached_data), 5)
+        self.assertEqual(len(cached_data), len(content['data']['quadrantData']))
 
     def test_cache_hit_returns_cached_data(self):
         """
@@ -179,7 +179,7 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         # Define the variables
         variables = {
             'startDate': '2015-01-01',
-            'endDate': '2020-01-01',
+            'endDate': '2021-01-01',
             'dataPoints': 20
         }
 
