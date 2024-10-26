@@ -370,7 +370,7 @@ class QuadrantDataChartCacheTests(GraphQLTestCase):
         self.assertIsNotNone(updated_index, msg="Updated data point not found in the new cached data.")
 
         # Verify that the updated value is reflected
-        updated_gdp_growth = new_cached_data[updated_index]['gdpGrowth']
+        updated_gdp_growth = new_cached_data[updated_index]['gdp_growth']
 
         # Recalculate expected_gdp_growth after the update
         # Re-fetch data to reflect the updated value

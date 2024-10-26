@@ -36,7 +36,7 @@ class Query(graphene.ObjectType):
             # Construct the cache key
             cache_key = f'quadrant_data_{start_date}_{end_date}_{data_points}_{last_updated_timestamp}'
 
-            # Attempt to retrieve from cache
+            # Attempt to retrieve from cache and deserializing the data
             cached_data = cache.get(cache_key)
             if cached_data:
                 return [QuadrantDataPointType(
@@ -103,20 +103,25 @@ class Query(graphene.ObjectType):
             data = []
             for date, row in combined_df.iterrows():
                 data.append({
-                    'date': date.date().isoformat(),
-                    'gdpGrowth': round(row['gdp_rate_of_change'] * 100, 4),
-                    'inflationGrowth': round(row['inflation_rate_of_change'] * 100, 4),
+                    'date': date.date(),
+                    'gdp_growth': round(row['gdp_rate_of_change'] * 100, 4),
+                    'inflation_growth': round(row['inflation_rate_of_change'] * 100, 4),
+                })
+            
+            # Serialize data before caching
+            cached_data = []
+            for item in data:
+                cached_data.append({
+                    'date': item['date'].isoformat(),  # Convert date to string
+                    'gdp_growth': item['gdp_growth'],
+                    'inflation_growth': item['inflation_growth'],
                 })
 
-            # Cache the data with no timeout, since cache key includes last_updated
-            cache.set(cache_key, data, timeout=None)
+            # Cache the serialized data
+            cache.set(cache_key, cached_data, timeout=None)
 
             # Return the data as QuadrantDataPointType instances
-            return [QuadrantDataPointType(
-                date=datetime.datetime.strptime(item['date'], '%Y-%m-%d').date(),
-                gdp_growth=item['gdpGrowth'],
-                inflation_growth=item['inflationGrowth']
-            ) for item in data]
+            return [QuadrantDataPointType(**item) for item in data]
 
         except (RealGDP.DoesNotExist, NominalInflation.DoesNotExist):
             return []

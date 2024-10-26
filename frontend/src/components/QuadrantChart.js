@@ -101,7 +101,7 @@ function QuadrantChart() {
   }, [data]);
 
   if (loading) return <p>Loading...</p>;
-  if (error) return <p>Error fetching data.</p>;
+  if (error) console.log(error); // return <p>Error fetching data.</p>;
 
   return (
     <ResponsiveContainer width="100%" height={600}>
