@@ -11,19 +11,9 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import { useQuery, gql } from "@apollo/client";
+import { useQuery } from "@apollo/client";
+import { GET_QUADRANT_DATA } from "../queries/getQuadrantChartData";
 import CustomTooltip from "./CustomTooltip";
-
-// Define the GraphQL query
-const GET_QUADRANT_DATA = gql`
-  query GetQuadrantData($dataPoints: Int!) {
-    quadrantData(dataPoints: $dataPoints) {
-      date
-      gdpGrowth
-      inflationGrowth
-    }
-  }
-`;
 
 function QuadrantChart() {
   const [data, setData] = useState([]);

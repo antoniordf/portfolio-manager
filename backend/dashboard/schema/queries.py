@@ -1,6 +1,6 @@
 import graphene
 from .types import RealGDPType, NominalInflationType, QuadrantDataPointType, FinancialDataPointType
-from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint, FinancialDataPoint
+from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint, FinancialDataPoint, DataSeries
 import pandas as pd
 from django.core.cache import cache
 import datetime
@@ -136,10 +136,66 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_stock_time_series(self, info, series_id, start_date=None, end_date=None):
+        # Get the DataSeries object
+        try:
+            series = DataSeries.objects.get(series_id=series_id)
+        except DataSeries.DoesNotExist:
+            return []
+    
         data = FinancialDataPoint.objects.filter(series__series_id=series_id)
+
         if start_date:
             data = data.filter(date__gte=start_date)
         if end_date:
             data = data.filter(date__lte=end_date)
-        return data.order_by('date')
+
+        data = data.order_by('date')
+
+        # Get the last updated timestamp from the DataSeries
+        last_updated = series.last_updated
+        last_updated_timestamp = int(last_updated.timestamp())
+
+        # Construct the cache key
+        cache_key = f'stock_time_series_{series_id}_{start_date}_{end_date}_{last_updated_timestamp}'
+
+        # Attempt to retrieve from cache
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            # Deserialize the data
+            return [FinancialDataPointType(
+                date=datetime.datetime.strptime(item['date'], '%Y-%m-%d').date(),
+                open=item['open'],
+                high=item['high'],
+                low=item['low'],
+                close=item['close'],
+                volume=item['volume'],
+            ) for item in cached_data]
+        
+        # Serialize the data before caching
+        serialized_data = []
+        for item in data:
+            serialized_data.append({
+                'date': item.date.isoformat(),
+                'open': item.open,
+                'high': item.high,
+                'low': item.low,
+                'close': item.close,
+                'volume': item.volume,
+            })
+        
+        # Cache the serialized data
+        cache.set(cache_key, serialized_data, timeout=None)
+
+        # Return data as FinancialDataPointType instances
+        return [
+            FinancialDataPointType(
+                date=item.date,
+                open=item.open,
+                high=item.high,
+                low=item.low,
+                close=item.close,
+                volume=item.volume,
+            )
+            for item in data
+        ]
     

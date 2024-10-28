@@ -12,6 +12,13 @@ const client = new ApolloClient({
               return incoming;
             },
           },
+          stockTimeSeries: {
+            // Define how stockTimeSeries is cached
+            keyArgs: ["seriesId", "startDate", "endDate"],
+            merge(existing = [], incoming) {
+              return incoming;
+            },
+          },
         },
       },
     },
