@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useEffect, useRef } from "react";
 import { createChart, CrosshairMode } from "lightweight-charts";
 import PropTypes from "prop-types";
 
-const StockChart = React.forwardRef(({ seriesId, chartType, data }, ref) => {
+const StockChart = React.forwardRef(({ chartType, data }, ref) => {
   const chartContainerRef = useRef();
   const chartRef = useRef();
   const priceSeriesRef = useRef();
@@ -128,7 +128,6 @@ const StockChart = React.forwardRef(({ seriesId, chartType, data }, ref) => {
 });
 
 StockChart.propTypes = {
-  seriesId: PropTypes.string.isRequired,
   chartType: PropTypes.oneOf(["line", "candlestick"]).isRequired,
   data: PropTypes.arrayOf(
     PropTypes.shape({

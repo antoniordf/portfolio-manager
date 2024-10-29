@@ -165,7 +165,7 @@ function StockChartContainer() {
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {/* Price Chart */}
           <StockChart
-            seriesId={ticker}
+            // seriesId={ticker}
             chartType={chartType}
             data={data.stockTimeSeries}
           />
