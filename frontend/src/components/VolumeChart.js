@@ -1,8 +1,10 @@
+// src/components/VolumeChart.js
+
 import React, { useLayoutEffect, useEffect, useRef } from "react";
 import { createChart, CrosshairMode } from "lightweight-charts";
 import PropTypes from "prop-types";
 
-const VolumeChart = React.forwardRef(({ data }, ref) => {
+const VolumeChart = React.forwardRef(({ data, onReady = null }, ref) => {
   const chartContainerRef = useRef();
   const chartRef = useRef();
   const volumeSeriesRef = useRef();
@@ -79,6 +81,7 @@ const VolumeChart = React.forwardRef(({ data }, ref) => {
     return () => {
       window.removeEventListener("resize", handleResize);
       chartRef.current.remove();
+      console.log("VolumeChart unmounted and disposed.");
     };
   }, [ref]);
 
@@ -87,13 +90,17 @@ const VolumeChart = React.forwardRef(({ data }, ref) => {
     if (data && volumeSeriesRef.current) {
       // Transform the volume data into the format needed for the chart
       const formattedVolumeData = data.map((point) => ({
-        time: point.date, // Correct key
+        time: point.date, // Ensure 'YYYY-MM-DD' format
         value: point.volume,
       }));
+
+      // Log formatted data for debugging
+      console.log("Formatted Volume Data:", formattedVolumeData);
 
       // Set data on the volume series
       try {
         volumeSeriesRef.current.setData(formattedVolumeData);
+        console.log("Volume data set successfully.");
       } catch (error) {
         console.error(`Error setting volume series data: ${error.message}`);
       }
@@ -101,16 +108,23 @@ const VolumeChart = React.forwardRef(({ data }, ref) => {
       // Fit the chart to the new data
       try {
         chartRef.current.timeScale().fitContent();
+        console.log("Volume chart fit to content successfully.");
       } catch (error) {
         console.error(
           `Error fitting volume chart to content: ${error.message}`
         );
       }
+
+      // Invoke the onReady callback after setting data
+      if (onReady) {
+        onReady();
+      }
     } else if (volumeSeriesRef.current) {
       // Clear the chart if there is no data
       volumeSeriesRef.current.setData([]);
+      console.log("Volume data cleared.");
     }
-  }, [data]);
+  }, [data, onReady]);
 
   return (
     <div style={{ position: "relative" }}>
@@ -127,6 +141,9 @@ VolumeChart.propTypes = {
       volume: PropTypes.number.isRequired,
     })
   ).isRequired,
+  onReady: PropTypes.func,
 };
+
+// Removed defaultProps
 
 export default VolumeChart;
