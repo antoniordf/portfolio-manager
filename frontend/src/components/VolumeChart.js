@@ -1,5 +1,3 @@
-// src/components/VolumeChart.js
-
 import React, { useLayoutEffect, useEffect, useRef } from "react";
 import { createChart, CrosshairMode } from "lightweight-charts";
 import PropTypes from "prop-types";
@@ -16,7 +14,7 @@ const VolumeChart = React.forwardRef(({ data, onReady = null }, ref) => {
     // Create the chart
     chartRef.current = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 150, // Adjust height as needed
+      height: 150,
       layout: {
         backgroundColor: "#ffffff",
         textColor: "#000",
@@ -61,75 +59,80 @@ const VolumeChart = React.forwardRef(({ data, onReady = null }, ref) => {
       },
     });
 
-    // Handle window resize
-    const handleResize = () => {
-      chartRef.current.applyOptions({
-        width: chartContainerRef.current.clientWidth,
-      });
-      setTimeout(() => {
-        chartRef.current.timeScale().fitContent();
-      }, 0);
-    };
-    window.addEventListener("resize", handleResize);
-
     // Attach the chart instance to the forwarded ref
     if (ref) {
       ref.current = chartRef.current;
     }
 
+    // Handle window resize
+    const handleResize = () => {
+      if (chartRef.current && chartContainerRef.current) {
+        chartRef.current.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+        });
+        chartRef.current.timeScale().fitContent();
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+
     // Clean up on unmount
     return () => {
       window.removeEventListener("resize", handleResize);
-      chartRef.current.remove();
-      console.log("VolumeChart unmounted and disposed.");
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+        volumeSeriesRef.current = null;
+        console.log("VolumeChart unmounted and disposed.");
+      }
     };
-  }, [ref]);
+  }, []);
 
   // Update chart data when 'data' changes
   useEffect(() => {
-    if (data && volumeSeriesRef.current) {
-      // Transform the volume data into the format needed for the chart
-      const formattedVolumeData = data.map((point) => ({
-        time: point.date, // Ensure 'YYYY-MM-DD' format
+    if (!chartRef.current || !volumeSeriesRef.current || !data?.length) return;
+
+    try {
+      const formattedData = data.map((point) => ({
+        time: point.date,
         value: point.volume,
+        color: point.close >= point.open ? "#26a69a" : "#ef5350",
       }));
 
-      // Log formatted data for debugging
-      console.log("Formatted Volume Data:", formattedVolumeData);
+      volumeSeriesRef.current.setData(formattedData);
 
-      // Set data on the volume series
-      try {
-        volumeSeriesRef.current.setData(formattedVolumeData);
-        console.log("Volume data set successfully.");
-      } catch (error) {
-        console.error(`Error setting volume series data: ${error.message}`);
-      }
+      // Ensure chart is properly scaled
+      chartRef.current.timeScale().fitContent();
 
-      // Fit the chart to the new data
-      try {
-        chartRef.current.timeScale().fitContent();
-        console.log("Volume chart fit to content successfully.");
-      } catch (error) {
-        console.error(
-          `Error fitting volume chart to content: ${error.message}`
-        );
-      }
-
-      // Invoke the onReady callback after setting data
+      // Delay the ready callback to ensure chart is fully rendered
       if (onReady) {
-        onReady();
+        requestAnimationFrame(() => {
+          onReady();
+        });
       }
-    } else if (volumeSeriesRef.current) {
-      // Clear the chart if there is no data
-      volumeSeriesRef.current.setData([]);
-      console.log("Volume data cleared.");
+    } catch (error) {
+      console.error("Error updating volume chart:", error);
     }
   }, [data, onReady]);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "150px",
+        marginTop: "1px", // Add small gap between charts
+        visibility: data?.length ? "visible" : "hidden",
+      }}
+    >
       {/* Chart Container */}
-      <div ref={chartContainerRef} style={{ width: "100%", height: "150px" }} />
+      <div
+        ref={chartContainerRef}
+        style={{
+          width: "100%",
+          height: "100%",
+        }}
+      />
     </div>
   );
 });
@@ -143,7 +146,5 @@ VolumeChart.propTypes = {
   ).isRequired,
   onReady: PropTypes.func,
 };
-
-// Removed defaultProps
 
 export default VolumeChart;

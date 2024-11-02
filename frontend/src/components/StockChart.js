@@ -1,5 +1,3 @@
-// src/components/StockChart.js
-
 import React, { useLayoutEffect, useEffect, useRef } from "react";
 import { createChart, CrosshairMode } from "lightweight-charts";
 import PropTypes from "prop-types";
@@ -10,9 +8,11 @@ const StockChart = React.forwardRef(
     const chartRef = useRef();
     const priceSeriesRef = useRef();
 
-    // Initialize the chart once using useLayoutEffect for synchronous execution
+    // Initialize the chart once
     useLayoutEffect(() => {
       if (!chartContainerRef.current) return;
+
+      console.log("StockChart useLayoutEffect running");
 
       // Create the chart
       chartRef.current = createChart(chartContainerRef.current, {
@@ -43,94 +43,82 @@ const StockChart = React.forwardRef(
         },
       });
 
-      // Add the Price Series (Line or Candlestick)
-      if (chartType === "line") {
-        priceSeriesRef.current = chartRef.current.addLineSeries({
-          color: "#2962FF",
-          lineWidth: 2,
-        });
-      } else if (chartType === "candlestick") {
-        priceSeriesRef.current = chartRef.current.addCandlestickSeries({
-          upColor: "#4CAF50",
-          downColor: "#F44336",
-          borderDownColor: "#F44336",
-          borderUpColor: "#4CAF50",
-          wickDownColor: "#F44336",
-          wickUpColor: "#4CAF50",
-        });
-      }
-
-      // Handle window resize
-      const handleResize = () => {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-        });
-        setTimeout(() => {
-          chartRef.current.timeScale().fitContent();
-        }, 0);
-      };
-      window.addEventListener("resize", handleResize);
-
       // Attach the chart instance to the forwarded ref
       if (ref) {
         ref.current = chartRef.current;
       }
 
+      // Handle window resize
+      const handleResize = () => {
+        if (chartRef.current) {
+          chartRef.current.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+          });
+          chartRef.current.timeScale().fitContent();
+        }
+      };
+      window.addEventListener("resize", handleResize);
+
       // Clean up on unmount
       return () => {
         window.removeEventListener("resize", handleResize);
-        chartRef.current.remove();
-        console.log("StockChart unmounted and disposed.");
+        if (chartRef.current) {
+          chartRef.current.remove();
+          chartRef.current = null;
+          priceSeriesRef.current = null;
+          console.log("StockChart unmounted and disposed.");
+        }
       };
-    }, [chartType, ref]);
+    }, []); // Empty dependency array
 
-    // Update chart data when 'data' changes
+    // Update or create the price series when 'chartType' or 'data' changes
     useEffect(() => {
-      if (data && priceSeriesRef.current) {
-        // Transform the price data into the format needed for the chart
-        let formattedPriceData = [];
+      console.log("StockChart useEffect running with data:", data);
+
+      if (!chartRef.current || !data?.length) return;
+
+      try {
+        // Always remove existing series first if it exists
+        if (priceSeriesRef.current) {
+          chartRef.current.removeSeries(priceSeriesRef.current);
+        }
+
+        // Create new series
         if (chartType === "line") {
-          formattedPriceData = data.map((point) => ({
-            time: point.date, // Ensure 'YYYY-MM-DD' format
-            value: point.close,
-          }));
-        } else if (chartType === "candlestick") {
-          formattedPriceData = data.map((point) => ({
-            time: point.date, // Ensure 'YYYY-MM-DD' format
-            open: point.open,
-            high: point.high,
-            low: point.low,
-            close: point.close,
-          }));
+          priceSeriesRef.current = chartRef.current.addLineSeries({
+            color: "#2962FF",
+            lineWidth: 2,
+          });
+        } else {
+          priceSeriesRef.current = chartRef.current.addCandlestickSeries({
+            upColor: "#4CAF50",
+            downColor: "#F44336",
+            borderVisible: false,
+            wickVisible: true,
+          });
         }
 
-        // Log formatted data for debugging
-        console.log("Formatted Price Data:", formattedPriceData);
+        // Format and set data
+        const formattedData = data.map((point) => ({
+          time: point.date,
+          ...(chartType === "line"
+            ? { value: point.close }
+            : {
+                open: point.open,
+                high: point.high,
+                low: point.low,
+                close: point.close,
+              }),
+        }));
 
-        // Set data on the price series
-        try {
-          priceSeriesRef.current.setData(formattedPriceData);
-          console.log("Price data set successfully.");
-        } catch (error) {
-          console.error(`Error setting price series data: ${error.message}`);
-        }
+        priceSeriesRef.current.setData(formattedData);
+        chartRef.current.timeScale().fitContent();
 
-        // Fit the chart to the new data
-        try {
-          chartRef.current.timeScale().fitContent();
-          console.log("Chart fit to content successfully.");
-        } catch (error) {
-          console.error(`Error fitting chart to content: ${error.message}`);
-        }
-
-        // Invoke the onReady callback after setting data
         if (onReady) {
-          onReady();
+          setTimeout(onReady, 0);
         }
-      } else if (priceSeriesRef.current) {
-        // Clear the chart if there is no data
-        priceSeriesRef.current.setData([]);
-        console.log("Price data cleared.");
+      } catch (error) {
+        console.error("Error updating price chart:", error);
       }
     }, [data, chartType, onReady]);
 
@@ -161,4 +149,4 @@ StockChart.propTypes = {
   onReady: PropTypes.func,
 };
 
-export default StockChart;
+export default React.memo(StockChart);

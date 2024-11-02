@@ -22,6 +22,7 @@ function StockChartContainer({ synchronize = true }) {
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [chartType, setChartType] = useState("line");
   const [showVolume, setShowVolume] = useState(true);
+  const [shouldResetDates, setShouldResetDates] = useState(false);
 
   // Fetch stock data using useQuery
   const { loading, error, data } = useQuery(GET_STOCK_TIME_SERIES, {
@@ -30,7 +31,8 @@ function StockChartContainer({ synchronize = true }) {
   });
 
   const handleInputChange = (event) => {
-    setInputValue(event.target.value.toUpperCase());
+    const newValue = event.target.value.toUpperCase();
+    setInputValue(newValue);
   };
 
   const handleStartDateChange = (event) => {
@@ -57,9 +59,31 @@ function StockChartContainer({ synchronize = true }) {
       alert("Start date cannot be after end date.");
       return;
     }
-
+    setShouldResetDates(true);
     setTicker(inputValue);
   };
+
+  // Add effect to handle date resets
+  useEffect(() => {
+    if (shouldResetDates) {
+      setStartDate(defaultStartDate);
+      setEndDate(defaultEndDate);
+      setShouldResetDates(false);
+    }
+  }, [ticker, shouldResetDates, defaultStartDate, defaultEndDate]);
+
+  // Add debounce to ticker updates
+  useEffect(() => {
+    const updateTicker = () => {
+      if (inputValue !== ticker) {
+        setShouldResetDates(true);
+        setTicker(inputValue);
+      }
+    };
+
+    const timeoutId = setTimeout(updateTicker, 500);
+    return () => clearTimeout(timeoutId);
+  }, [inputValue, ticker]);
 
   // Refs to manage synchronization
   const stockChartRef = useRef();
@@ -89,83 +113,6 @@ function StockChartContainer({ synchronize = true }) {
     }
   }, [showVolume]);
 
-  // Determine if synchronization should be active
-  const shouldSynchronize =
-    synchronize && data && data.stockTimeSeries.length > 0 && chartsReady;
-
-  // State to store synchronization listeners for cleanup
-  const [syncListeners, setSyncListeners] = useState({});
-
-  // Set up synchronization when charts are ready
-  useEffect(() => {
-    if (!shouldSynchronize) return;
-
-    if (
-      stockChartRef.current &&
-      volumeChartRef.current &&
-      stockChartRef.current.timeScale &&
-      volumeChartRef.current.timeScale
-    ) {
-      const stockTimeScale = stockChartRef.current.timeScale();
-      const volumeTimeScale = volumeChartRef.current.timeScale();
-
-      let isSyncing = false;
-
-      const handleStockScaleChange = () => {
-        if (isSyncing) return;
-        isSyncing = true;
-        const stockRange = stockTimeScale.getVisibleLogicalRange();
-        if (stockRange) {
-          console.log(
-            "Synchronizing Volume Chart to Stock Chart range:",
-            stockRange
-          );
-          volumeTimeScale.setVisibleLogicalRange(stockRange);
-        }
-        isSyncing = false;
-      };
-
-      const handleVolumeScaleChange = () => {
-        if (isSyncing) return;
-        isSyncing = true;
-        const volumeRange = volumeTimeScale.getVisibleLogicalRange();
-        if (volumeRange) {
-          console.log(
-            "Synchronizing Stock Chart to Volume Chart range:",
-            volumeRange
-          );
-          stockTimeScale.setVisibleLogicalRange(volumeRange);
-        }
-        isSyncing = false;
-      };
-
-      // Subscribe to scale changes
-      stockTimeScale.subscribeVisibleLogicalRangeChange(handleStockScaleChange);
-      volumeTimeScale.subscribeVisibleLogicalRangeChange(
-        handleVolumeScaleChange
-      );
-
-      console.log("Synchronization setup complete.");
-
-      // Store listeners for cleanup
-      setSyncListeners({
-        stock: handleStockScaleChange,
-        volume: handleVolumeScaleChange,
-      });
-
-      // Cleanup function
-      return () => {
-        stockTimeScale.unsubscribeVisibleLogicalRangeChange(
-          handleStockScaleChange
-        );
-        volumeTimeScale.unsubscribeVisibleLogicalRangeChange(
-          handleVolumeScaleChange
-        );
-        console.log("Synchronization cleanup complete.");
-      };
-    }
-  }, [shouldSynchronize]);
-
   // When both charts are ready, set chartsReady to true
   useEffect(() => {
     if (stockReady && (showVolume ? volumeReady : true)) {
@@ -176,6 +123,97 @@ function StockChartContainer({ synchronize = true }) {
       setChartsReady(false);
     }
   }, [stockReady, volumeReady, showVolume]);
+
+  // Determine if synchronization should be active
+  const shouldSynchronize =
+    synchronize && data && data.stockTimeSeries.length > 0 && chartsReady;
+
+  // Set up synchronization when charts are ready
+  useEffect(() => {
+    if (!shouldSynchronize || !chartsReady || !data?.stockTimeSeries?.length)
+      return;
+
+    // Ensure chart instances are current
+    const stockChart = stockChartRef.current;
+    const volumeChart = volumeChartRef.current;
+
+    if (!stockChart?.timeScale || (showVolume && !volumeChart?.timeScale)) {
+      return;
+    }
+
+    // Force initial layout
+    requestAnimationFrame(() => {
+      stockChart.timeScale().fitContent();
+      if (showVolume && volumeChart) {
+        volumeChart.timeScale().fitContent();
+        // Force sync after initial layout
+        const range = stockChart.timeScale().getVisibleLogicalRange();
+        if (range) {
+          volumeChart.timeScale().setVisibleLogicalRange(range);
+        }
+      }
+    });
+
+    let isUpdating = false;
+
+    const syncCharts = (sourceChart, targetChart) => {
+      if (isUpdating) return;
+
+      try {
+        isUpdating = true;
+        const range = sourceChart.timeScale().getVisibleLogicalRange();
+        if (range) {
+          targetChart.timeScale().setVisibleLogicalRange(range);
+        }
+        setTimeout(() => {
+          isUpdating = false;
+        }, 80);
+      } catch (error) {
+        console.error("Sync error:", error);
+        isUpdating = false;
+      }
+    };
+
+    // Initial sync
+    if (showVolume) {
+      requestAnimationFrame(() => {
+        syncCharts(stockChart, volumeChart);
+      });
+    }
+
+    const handleStockScaleChange = () => {
+      if (showVolume) syncCharts(stockChart, volumeChart);
+    };
+
+    const handleVolumeScaleChange = () => {
+      if (showVolume) syncCharts(volumeChart, stockChart);
+    };
+
+    // Set up synchronization
+    stockChart
+      .timeScale()
+      .subscribeVisibleLogicalRangeChange(handleStockScaleChange);
+    if (showVolume) {
+      volumeChart
+        .timeScale()
+        .subscribeVisibleLogicalRangeChange(handleVolumeScaleChange);
+    }
+
+    return () => {
+      try {
+        stockChart
+          .timeScale()
+          .unsubscribeVisibleLogicalRangeChange(handleStockScaleChange);
+        if (showVolume && volumeChart?.timeScale) {
+          volumeChart
+            .timeScale()
+            .unsubscribeVisibleLogicalRangeChange(handleVolumeScaleChange);
+        }
+      } catch (error) {
+        console.warn("Cleanup error:", error);
+      }
+    };
+  }, [shouldSynchronize, chartsReady, showVolume, data]);
 
   // Debugging: Log data to verify correct structure
   useEffect(() => {
@@ -283,27 +321,25 @@ function StockChartContainer({ synchronize = true }) {
         </button>
       </form>
 
-      {/* Render Charts Only When Data is Available */}
-      {!loading && !error && data && data.stockTimeSeries.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* Price Chart */}
-          <StockChart
-            ref={stockChartRef}
-            chartType={chartType}
-            data={data.stockTimeSeries}
-            onReady={handleStockReady}
-          />
+      {/* Always render the charts */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        {/* Price Chart */}
+        <StockChart
+          ref={stockChartRef}
+          chartType={chartType}
+          data={data ? data.stockTimeSeries : []}
+          onReady={handleStockReady}
+        />
 
-          {/* Volume Chart */}
-          {showVolume && (
-            <VolumeChart
-              ref={volumeChartRef}
-              data={data.stockTimeSeries}
-              onReady={handleVolumeReady}
-            />
-          )}
-        </div>
-      )}
+        {/* Volume Chart */}
+        {showVolume && (
+          <VolumeChart
+            ref={volumeChartRef}
+            data={data ? data.stockTimeSeries : []}
+            onReady={handleVolumeReady}
+          />
+        )}
+      </div>
 
       {/* Handle Loading, Error, and No-Data States */}
       {loading && (
