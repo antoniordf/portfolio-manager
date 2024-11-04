@@ -83,7 +83,6 @@ const VolumeChart = React.forwardRef(({ data, onReady = null }, ref) => {
         chartRef.current.remove();
         chartRef.current = null;
         volumeSeriesRef.current = null;
-        console.log("VolumeChart unmounted and disposed.");
       }
     };
   }, []);

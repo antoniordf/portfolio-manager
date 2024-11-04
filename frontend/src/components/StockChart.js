@@ -12,8 +12,6 @@ const StockChart = React.forwardRef(
     useLayoutEffect(() => {
       if (!chartContainerRef.current) return;
 
-      console.log("StockChart useLayoutEffect running");
-
       // Create the chart
       chartRef.current = createChart(chartContainerRef.current, {
         width: chartContainerRef.current.clientWidth,
@@ -66,15 +64,12 @@ const StockChart = React.forwardRef(
           chartRef.current.remove();
           chartRef.current = null;
           priceSeriesRef.current = null;
-          console.log("StockChart unmounted and disposed.");
         }
       };
     }, []); // Empty dependency array
 
     // Update or create the price series when 'chartType' or 'data' changes
     useEffect(() => {
-      console.log("StockChart useEffect running with data:", data);
-
       if (!chartRef.current || !data?.length) return;
 
       try {

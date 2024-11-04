@@ -96,19 +96,16 @@ function StockChartContainer({ synchronize = true }) {
 
   // Callbacks to set readiness
   const handleStockReady = () => {
-    console.log("StockChart is ready.");
     setStockReady(true);
   };
 
   const handleVolumeReady = () => {
-    console.log("VolumeChart is ready.");
     setVolumeReady(true);
   };
 
   // Reset readiness when Volume chart is toggled off
   useEffect(() => {
     if (!showVolume) {
-      console.log("VolumeChart is hidden. Resetting volumeReady to false.");
       setVolumeReady(false);
     }
   }, [showVolume]);
@@ -116,10 +113,8 @@ function StockChartContainer({ synchronize = true }) {
   // When both charts are ready, set chartsReady to true
   useEffect(() => {
     if (stockReady && (showVolume ? volumeReady : true)) {
-      console.log("Charts are ready. Setting chartsReady to true.");
       setChartsReady(true);
     } else {
-      console.log("Charts are not ready. Setting chartsReady to false.");
       setChartsReady(false);
     }
   }, [stockReady, volumeReady, showVolume]);
@@ -167,9 +162,8 @@ function StockChartContainer({ synchronize = true }) {
         }
         setTimeout(() => {
           isUpdating = false;
-        }, 80);
+        }, 30);
       } catch (error) {
-        console.error("Sync error:", error);
         isUpdating = false;
       }
     };
@@ -214,13 +208,6 @@ function StockChartContainer({ synchronize = true }) {
       }
     };
   }, [shouldSynchronize, chartsReady, showVolume, data]);
-
-  // Debugging: Log data to verify correct structure
-  useEffect(() => {
-    if (data) {
-      console.log("Fetched Data:", data);
-    }
-  }, [data]);
 
   return (
     <div style={{ margin: "20px 0" }}>
