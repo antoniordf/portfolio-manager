@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'graphene_django',
+    'data_pipeline.apps.DataPipelineConfig',
     'data_fetch.apps.DataFetchConfig',
     'dashboard.apps.DashboardConfig',
     'rest_framework',

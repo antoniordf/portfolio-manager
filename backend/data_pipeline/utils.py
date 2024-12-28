@@ -1,8 +1,11 @@
 import requests
-from .models import DataSeries
+from dashboard.models import DataSeries
 from django.contrib.contenttypes.models import ContentType
-from .models import EconomicDataPoint, FinancialDataPoint
+from dashboard.models import EconomicDataPoint, FinancialDataPoint
 from datetime import datetime, timedelta
+from google.cloud import bigquery
+import io
+import csv
 
 def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin, data_type):
     """
@@ -155,3 +158,64 @@ def parse_metadata(response_json, data_origin):
 def parse_series_data(response_json, data_origin):
     if data_origin == 'fred':
         return [{'date': obs['date'], 'value': obs['value']} for obs in response_json['observations']]
+    
+def load_historical_economic_data_to_bq(table_id: str, data_rows: list[dict]):
+    """
+    Loads older (or any) economic data into BigQuery via a load job.
+
+    Expects data_rows in the form:
+    [
+      {
+        "series_id": "GDPC1",
+        "date": "1960-01-01",
+        "value": 123.45
+      },
+      {
+        "series_id": "CPIAUCSL",
+        "date": "1960-01-01",
+        "value": 99.99
+      },
+      ...
+    ]
+
+    'table_id' is the full BigQuery table identifier, e.g.:
+        "your-project.your_dataset.economic_data_points"
+    """
+
+    client = bigquery.Client()
+
+    # 1) Convert data_rows into an in-memory CSV with series_id, date, value
+    csv_buffer = io.StringIO()
+    writer = csv.writer(csv_buffer)
+    writer.writerow(["series_id", "date", "value"])  # CSV header
+
+    for row in data_rows:
+        writer.writerow([
+            row["series_id"],
+            row["date"],
+            row["value"],
+        ])
+
+    csv_buffer.seek(0)  # rewind
+
+    # 2) Configure the load job
+    job_config = bigquery.LoadJobConfig(
+        schema=[
+            bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+            bigquery.SchemaField("value", "FLOAT64", mode="NULLABLE"),
+        ],
+        source_format=bigquery.SourceFormat.CSV,
+        skip_leading_rows=1,
+        write_disposition="WRITE_APPEND",  # or "WRITE_TRUNCATE" to overwrite
+    )
+
+    # 3) Run the load job
+    load_job = client.load_table_from_file(
+        csv_buffer,
+        table_id,
+        job_config=job_config,
+    )
+    load_job.result()  # Wait for it to finish
+
+    print(f"Loaded {len(data_rows)} economic rows into '{table_id}'.")
