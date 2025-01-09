@@ -1,36 +1,12 @@
-from graphene_django import DjangoObjectType
-from dashboard.models import RealGDP, NominalInflation, EconomicDataPoint, FinancialDataPoint
 import graphene
 
-class FinancialDataPointType(DjangoObjectType):
-    class Meta:
-        model = FinancialDataPoint
-        fields = '__all__'
-
-class EconomicDataPointType(DjangoObjectType):
-    class Meta:
-        model = EconomicDataPoint
-        fields = '__all__'
-
-class RealGDPType(DjangoObjectType):
-    economic_data_points = graphene.List(EconomicDataPointType)
-
-    class Meta:
-        model = RealGDP
-        fields = '__all__'
-
-    def resolve_economic_data_points(self, info):
-        return self.economic_data_points.all().order_by('date')
-
-class NominalInflationType(DjangoObjectType):
-    economic_data_points = graphene.List(EconomicDataPointType)
-
-    class Meta:
-        model = NominalInflation
-        fields = '__all__'
-
-    def resolve_economic_data_points(self, info):
-        return self.economic_data_points.all().order_by('date')
+class FinancialDataPointType(graphene.ObjectType):
+    date = graphene.String()   # or graphene.Date(), but typically a string is easier for the front-end
+    open = graphene.Float()
+    high = graphene.Float()
+    low = graphene.Float()
+    close = graphene.Float()
+    volume = graphene.Float()
 
 class QuadrantDataPointType(graphene.ObjectType):
     date = graphene.Date()

@@ -1,11 +1,18 @@
+import logging
+import os, tempfile
+from venv import logger
+from django.conf import settings
 import requests
-from dashboard.models import DataSeries
-from django.contrib.contenttypes.models import ContentType
-from dashboard.models import EconomicDataPoint, FinancialDataPoint
-from datetime import datetime, timedelta
+from datetime import datetime
 from google.cloud import bigquery
 import io
 import csv
+
+client = bigquery.Client()
+ECONOMIC_TABLE_ID = settings.ECONOMIC_TABLE_ID
+FINANCIAL_TABLE_ID = settings.FINANCIAL_TABLE_ID
+
+logger = logging.getLogger(__name__)
 
 def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin, data_type):
     """
@@ -57,15 +64,9 @@ def fetch_and_save_metadata(api_key, series_id, DataSeriesClass, data_origin, da
 
 def fetch_and_save_series(api_key, data_series_instance, data_origin):
     """
-    Fetches time series data for a given DataSeries instance from the specified data source and saves it to the database.
-    
-    Parameters:
-    - api_key: Your API key.
-    - data_series_instance: An instance of a DataSeries subclass (e.g., RealGDP) where the data will be saved.
-    - data_origin: The source of the data (e.g., 'fred', 'quandl', 'yahoofinance').
-    
-    Returns:
-    - None
+    Fetch time series data for data_series_instance from the data_origin
+    and writes it into BigQuery. No reference to local Django model points.
+    Checks BigQuery to avoid duplicates if desired.
     """
     # Check if there is existing data in the database
     if data_series_instance.data_type == 'economic':
@@ -189,16 +190,46 @@ def load_historical_economic_data_to_bq(table_id: str, data_rows: list[dict]):
     writer = csv.writer(csv_buffer)
     writer.writerow(["series_id", "date", "value"])  # CSV header
 
+    # Inspect for suspicious values
+    suspicious_count = 0
+
     for row in data_rows:
+        # Check if row["value"] is something like NaN or "NaT"
+        if str(row["value"]) == "NaN" or str(row["value"]) == "NaT":
+            logger.warning(f"Suspicious row: {row}")
+            suspicious_count += 1
+            
         writer.writerow([
             row["series_id"],
             row["date"],
             row["value"],
         ])
 
+    if suspicious_count > 0:
+        logger.warning(f"Found {suspicious_count} suspicious rows in data_rows. Investigate them.")
+
     csv_buffer.seek(0)  # rewind
 
-    # 2) Configure the load job
+    # 2) DEBUG: Write CSV to a temp file so you can manually open + inspect
+    custom_temp_dir = os.path.expanduser("~/my_debug_csvs")
+    os.makedirs(custom_temp_dir, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        delete=True,
+        suffix='.csv',
+        dir=custom_temp_dir,
+        prefix='my_fred_debug_'
+    ) as tmpfile:
+        tmpfile_name = tmpfile.name
+        logger.info(f"Writing debug CSV to: {tmpfile_name}")
+        tmpfile.write(csv_buffer.getvalue())
+    # After this, the file remains on disk, so you can open in Excel or similar.
+
+    # (Rewind the buffer again after writing to tmpfile)
+    csv_buffer.seek(0)
+
+    # 3) Configure the load job
     job_config = bigquery.LoadJobConfig(
         schema=[
             bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
@@ -210,12 +241,39 @@ def load_historical_economic_data_to_bq(table_id: str, data_rows: list[dict]):
         write_disposition="WRITE_APPEND",  # or "WRITE_TRUNCATE" to overwrite
     )
 
-    # 3) Run the load job
-    load_job = client.load_table_from_file(
-        csv_buffer,
-        table_id,
-        job_config=job_config,
-    )
-    load_job.result()  # Wait for it to finish
+    # 4) Run the load job
+    try:
+        load_job = client.load_table_from_file(
+            csv_buffer,
+            table_id,
+            job_config=job_config,
+        )
+        load_job.result()  # Wait for it to finish
+        print(f"Loaded {len(data_rows)} economic rows into '{table_id}'.")
+    except Exception as e:
+        print(f"Failed to load data into BigQuery: {e}")
 
-    print(f"Loaded {len(data_rows)} economic rows into '{table_id}'.")
+def create_temp_dataset_if_not_exists() -> str:
+    """
+    Ensures that a staging dataset for merges/temporary tables exists in BigQuery.
+    Returns the full "project.dataset" string.
+
+    Expects:
+      settings.STAGING_DATASET_ID = "myproject.my_staging_dataset"
+    """
+    staging_dataset_id = settings.STAGING_DATASET_ID  # e.g. "myproject.my_staging_dataset"
+    client = bigquery.Client()
+
+    try:
+        # Attempt to get the dataset; if it doesn't exist, an exception is raised
+        client.get_dataset(staging_dataset_id)
+        logger.info(f"Staging dataset {staging_dataset_id} already exists.")
+    except Exception:
+        # Create dataset
+        project, dataset_name = staging_dataset_id.split(".", 1)
+        dataset = bigquery.Dataset(staging_dataset_id)
+        dataset.location = "US"  # or your preferred location
+        client.create_dataset(dataset, exists_ok=True)
+        logger.info(f"Created staging dataset {staging_dataset_id} in project={project}.")
+
+    return staging_dataset_id

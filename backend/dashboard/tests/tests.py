@@ -1,10 +1,9 @@
-from django.test import TestCase, Client
-from django.urls import reverse
+from django.test import TestCase
 from rest_framework.test import APIClient
 from datetime import datetime
 from rest_framework import status
 from dashboard.models import RealGDP, TreasuryYield, NominalInflation, EconomicDataPoint
-from data_pipeline.utils import fetch_and_save_metadata, fetch_and_save_series
+from data_pipeline.utils.utils import fetch_and_save_metadata, fetch_and_save_series
 from django.conf import settings
 import pprint
 import json

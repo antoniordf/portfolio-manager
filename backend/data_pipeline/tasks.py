@@ -1,9 +1,9 @@
-import logging
 from typing import List, Dict
 from prefect import task, get_run_logger
 from django.conf import settings
 from dashboard.models import DataSeries
 from data_pipeline.data_sources.fetcher_manager import FetcherManager
+from prefect import task, get_run_logger
 
 @task
 def get_api_key(data_origin: str) -> str:

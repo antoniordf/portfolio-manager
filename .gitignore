@@ -1,5 +1,7 @@
 .env
 
+*.csv
+
 # Ignore virtual environment folders
 /env/
 /venv/

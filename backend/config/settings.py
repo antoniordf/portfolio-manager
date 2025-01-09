@@ -64,7 +64,6 @@ INSTALLED_APPS = [
     'corsheaders',
     'graphene_django',
     'data_pipeline.apps.DataPipelineConfig',
-    'data_fetch.apps.DataFetchConfig',
     'dashboard.apps.DashboardConfig',
     'rest_framework',
 ]
@@ -140,6 +139,11 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT'),
     }
 }
+
+# BigQuery Table IDs
+FINANCIAL_TABLE_ID = os.getenv('FINANCIAL_TABLE_ID')
+ECONOMIC_TABLE_ID = os.getenv('ECONOMIC_TABLE_ID')
+STAGING_DATASET_ID = os.getenv('STAGING_DATASET_ID')
 
 
 # Password validation

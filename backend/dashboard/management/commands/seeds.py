@@ -1,11 +1,12 @@
+import os
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from typing import List, Dict
+from data_pipeline.data_sources.fetcher_manager import FetcherManager
 from data_pipeline.flows import fetch_and_store_flow
 import pandas as pd
 from google.cloud import bigquery
 from data_pipeline.data_sources.fred import FREDFetcher
-from data_pipeline.utils import load_historical_economic_data_to_bq
+from data_pipeline.utils.utils import load_historical_economic_data_to_bq
 from fredapi import Fred
 
 fred_api_key = settings.FRED_API_KEY
@@ -45,10 +46,29 @@ class Command(BaseCommand):
     'retail_sales': 'MRTSSM44000USS',
     'consumer_credit': 'TOTALSL'
 }
+    # Get directory where seeds.py is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Navigate to data directory
+    data_path = os.path.join(current_dir, "..", "..", "data")
+    
+    csv_file_paths = {
+        'pmi_manufacturing': os.path.join(data_path, "pmi_manufacturing.csv"),
+        'pmi_services': os.path.join(data_path, "pmi_services.csv"),
+        'vix': os.path.join(data_path, "vix.csv"),
+        'dxy': os.path.join(data_path, "dxy.csv"),
+        'wb_commodity_agriculture_index': os.path.join(data_path, "wb_commodity_agriculture_index.csv"),
+        'wb_commodity_energy_index': os.path.join(data_path, "wb_commodity_energy_index.csv"),
+        'wb_commodity_metals_index': os.path.join(data_path, "wb_commodity_metals_index.csv"),
+        'sp_500': os.path.join(data_path, "sp_500.csv"),
+        'nasdaq': os.path.join(data_path, "nasdaq.csv"),
+        'credit': os.path.join(data_path, "credit.csv"),
+        'nfib': os.path.join(data_path, "nfib.csv"),
+        'consumer_sentiment': os.path.join(data_path, "consumer_sentiment.csv")
+    }
     
     # BigQuery table IDs
-    FINANCIAL_TABLE_ID = "portfolio-manager-445317.market_data.financial_data_points"
-    ECONOMIC_TABLE_ID  = "portfolio-manager-445317.market_data.economic_data_points"
+    FINANCIAL_TABLE_ID = settings.FINANCIAL_TABLE_ID
+    ECONOMIC_TABLE_ID  = settings.ECONOMIC_TABLE_ID
 
     def table_is_empty(self, table_id: str) -> bool:
         """
@@ -72,13 +92,64 @@ class Command(BaseCommand):
         Returns:
         - pd.DataFrame: A DataFrame with 'Date' and 'value' columns.
         """
+        if series_id == "UMCSENT" and (start_date is None or start_date < "1978-01-01"):
+            start_date = "1978-01-01"
+
         data = fred.get_series(series_id, start=start_date, end=end_date)
         df = data.reset_index()
         df.columns = ['Date', 'value']
         return df
     
+    def process_csv_data(self, csv_file_paths):
+        """Process each CSV file and load complete time series to BigQuery."""
+        csv_fetcher = FetcherManager.get_fetcher('csv', api_key='', csv_paths=self.csv_file_paths)
+        
+        for source, path in csv_file_paths.items():
+            # Read entire CSV
+            df = pd.read_csv(path)
+            print(f"\nProcessing {source}:")
+            print(f"Columns: {df.columns.tolist()}")
+            
+            # Process each series (column) in the CSV
+            for series_id in df.columns[1:]:  # Skip 'date' column
+                try:
+                    # 1. Save metadata
+                    data_type = 'financial' if source in ["vix", "dxy", "sp_500", "nasdaq"] else 'economic'
+                    csv_fetcher.save_metadata(series_id, data_type, 'csv_file')
+                    self.stdout.write(self.style.SUCCESS(f"Saved metadata for series: {series_id}"))
+
+                    # 2. Prepare time series data
+                    series_df = df[['date', series_id]].copy()
+                    series_df['date'] = pd.to_datetime(series_df['date']).dt.strftime('%Y-%m-%d')
+                    series_df[series_id] = pd.to_numeric(series_df[series_id], errors='coerce')
+                    series_df = series_df.dropna()
+
+                    # 3. Format for BigQuery
+                    historical_rows = [
+                        {
+                            'series_id': series_id,
+                            'date': row['date'],
+                            'value': float(row[series_id])
+                        }
+                        for _, row in series_df.iterrows()
+                    ]
+
+                    # 4. Load to BigQuery
+                    if historical_rows:
+                        table_id = self.FINANCIAL_TABLE_ID if data_type == 'financial' else self.ECONOMIC_TABLE_ID
+                        load_historical_economic_data_to_bq(table_id, historical_rows)
+                        self.stdout.write(self.style.SUCCESS(
+                            f"Loaded {len(historical_rows)} rows for {series_id} into {table_id}"
+                        ))
+                except Exception as e:
+                    self.stderr.write(self.style.ERROR(f"Error processing {series_id}: {e}"))
+                    continue
+    
     def prepare_data(self, fred_series_ids):
-        # Scrape S&P 500 data from Wikipedia
+        """
+        Scrape S&P 500 tickers from Wikipedia => create data list for 'financial'.
+        Then create data list for 'economic' from the fred_series_ids dictionary.
+        """
         url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
         sp500_table = pd.read_html(url)[0]
         sp_500_tickers = list(sp500_table['Symbol'])
@@ -103,18 +174,21 @@ class Command(BaseCommand):
         self.stdout.write(f"Preparing to seed {total_series_sp500} data series...")
 
         BATCH_SIZE = 50
-        for i in range(0, len(data_sp500), BATCH_SIZE):
-            batch = data_sp500[i : i + BATCH_SIZE]
-            try:
-                # This runs your Prefect flow in the main process, sequentially
-                fetch_and_store_flow(batch)  
-                self.stdout.write(self.style.SUCCESS(
-                    f"Processed batch from index {i} to {i + BATCH_SIZE}"
-                ))
-            except Exception as e:
-                self.stderr.write(self.style.ERROR(f"Error triggering data fetching tasks: {e}"))
-                break
+
+        # 1) Fetch SP500 (financial) data in small batches
+        # for i in range(0, len(data_sp500), BATCH_SIZE):
+        #     batch = data_sp500[i : i + BATCH_SIZE]
+        #     try:
+        #         # This runs your Prefect flow in the main process, sequentially
+        #         fetch_and_store_flow(batch)  
+        #         self.stdout.write(self.style.SUCCESS(
+        #             f"Processed batch from index {i} to {i + BATCH_SIZE}"
+        #         ))
+        #     except Exception as e:
+        #         self.stderr.write(self.style.ERROR(f"Error triggering data fetching tasks: {e}"))
+        #         break
         
+        # 2) If the economic table is empty, do a bulk load from older data
         if self.table_is_empty(self.ECONOMIC_TABLE_ID):
             self.stdout.write("Loading economic data to BigQuery via csv...")
 
@@ -126,7 +200,7 @@ class Command(BaseCommand):
                 data_type = item['data_type']
                 data_origin = item['data_origin']
 
-                # 1) Save metadata => create DataSeries
+                # 2a) Save metadata => create or update DataSeries
                 try:
                     fred_fetcher.save_metadata(series_id, data_type, data_origin)
                     self.stdout.write(self.style.SUCCESS(f"Saved metadata for series: {series_id}"))
@@ -134,15 +208,21 @@ class Command(BaseCommand):
                     self.stderr.write(self.style.ERROR(f"Failed to save metadata for {series_id}: {e}"))
                     continue  # Skip to the next series if metadata saving fails
 
-                # 2) Fetch entire range
+                # 2b) Fetch the entire range directly from FRED
                 try:
                     observations = self.fetch_fred_series(series_id)
                     self.stdout.write(self.style.SUCCESS(f"Fetched data for series: {series_id}"))
                 except Exception as e:
                     self.stderr.write(self.style.ERROR(f"Failed to fetch data for {series_id}: {e}"))
                     continue  # Skip to the next series if data fetching fails
+
+                # 2c) Filter out NaT or NaN
+                observations = observations.dropna(subset=['Date', 'value'])  # drops rows with NaT or NaN
+                # Also ensure 'value' is numeric; coerce invalid -> NaN -> drop
+                observations['value'] = pd.to_numeric(observations['value'], errors='coerce')
+                observations = observations.dropna(subset=['value'])
                 
-                # 3) Transform into { series_id, date, value } and accumulate
+                # 2d) Accumulate for CSV load
                 for _, row in observations.iterrows():
                     historical_rows.append({
                         "series_id": series_id,
@@ -150,7 +230,7 @@ class Command(BaseCommand):
                         "value": row["value"],
                     })
 
-             # 4) Bulk load into BQ once
+            # 2e) Bulk load the historical data once
             try:
                 load_historical_economic_data_to_bq(self.ECONOMIC_TABLE_ID, historical_rows)
                 self.stdout.write(self.style.SUCCESS(
@@ -159,6 +239,8 @@ class Command(BaseCommand):
             except Exception as e:
                 self.stderr.write(self.style.ERROR(f"Failed to load data into BigQuery: {e}"))
         else:
+            # If the table is NOT empty, just do a normal fetch_and_store_flow
+            # to pick up any new data. (No huge CSV load needed.)
             for i in range(0, len(data_fred), BATCH_SIZE):
                 batch = data_fred[i : i + BATCH_SIZE]
                 try:
@@ -170,3 +252,7 @@ class Command(BaseCommand):
                 except Exception as e:
                     self.stderr.write(self.style.ERROR(f"Error triggering data fetching tasks: {e}"))
                     break
+    
+        # 3) Process CSV data
+        self.process_csv_data(self.csv_file_paths)
+        
