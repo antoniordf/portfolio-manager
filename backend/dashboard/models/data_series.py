@@ -21,6 +21,7 @@ class DataSeries(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    last_data_date = models.DateField(null=True, blank=True, help_text="Date of the most recent data point in the time series.")
 
     DATA_ORIGINS = (
         ('fred', 'FRED'),

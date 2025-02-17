@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -6,8 +7,13 @@ from data_pipeline.flows import fetch_and_store_flow
 import pandas as pd
 from google.cloud import bigquery
 from data_pipeline.data_sources.fred import FREDFetcher
-from data_pipeline.utils.utils import load_historical_economic_data_to_bq
+from data_pipeline.utils.utils import load_csv_to_bq, load_csv_in_chunks_to_bq
 from fredapi import Fred
+from dashboard.models import DataSeries
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 fred_api_key = settings.FRED_API_KEY
 fred = Fred(api_key=fred_api_key)
@@ -65,6 +71,21 @@ class Command(BaseCommand):
         'nfib': os.path.join(data_path, "nfib.csv"),
         'consumer_sentiment': os.path.join(data_path, "consumer_sentiment.csv")
     }
+
+    date_formats = {
+            'pmi_manufacturing': '%d/%m/%Y',
+            'pmi_services': '%d/%m/%Y',
+            'vix': '%d/%m/%Y',
+            'dxy': '%d/%m/%Y',
+            'sp_500': '%m/%d/%Y',
+            'nasdaq': '%m/%d/%Y',
+            'credit': '%d/%m/%Y',
+            'nfib': '%d/%m/%Y',
+            'consumer_sentiment': '%d/%m/%Y',
+            'wb_commodity_agriculture_index': '%d/%m/%Y',
+            'wb_commodity_energy_index': '%d/%m/%Y',
+            'wb_commodity_metals_index': '%d/%m/%Y'
+        }
     
     # BigQuery table IDs
     FINANCIAL_TABLE_ID = settings.FINANCIAL_TABLE_ID
@@ -101,50 +122,125 @@ class Command(BaseCommand):
         return df
     
     def process_csv_data(self, csv_file_paths):
-        """Process each CSV file and load complete time series to BigQuery."""
+        # Define schemas
+        economic_schema = [
+            bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+            bigquery.SchemaField("component", "STRING", mode="NULLABLE"),  # Allow nulls for non-subcomponent data
+            bigquery.SchemaField("value", "FLOAT64", mode="NULLABLE"),
+        ]
+        financial_schema = [
+            bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+            bigquery.SchemaField("open", "FLOAT64", mode="NULLABLE"),
+            bigquery.SchemaField("high", "FLOAT64", mode="NULLABLE"),
+            bigquery.SchemaField("low", "FLOAT64", mode="NULLABLE"),
+            bigquery.SchemaField("close", "FLOAT64", mode="NULLABLE"),
+            bigquery.SchemaField("volume", "INTEGER", mode="NULLABLE"),
+        ]
+        financial_sources = {"vix", "dxy", "sp_500", "nasdaq"}
+
         csv_fetcher = FetcherManager.get_fetcher('csv', api_key='', csv_paths=self.csv_file_paths)
-        
+
         for source, path in csv_file_paths.items():
-            # Read entire CSV
-            df = pd.read_csv(path)
-            print(f"\nProcessing {source}:")
-            print(f"Columns: {df.columns.tolist()}")
+            print(f"\nProcessing {source}: {path}")
+            try:
+                df = pd.read_csv(path)
+            except Exception as e:
+                print(f"Error reading {path}: {e}")
+                continue
+
+            # Standardize and parse dates
+            if 'Date' in df.columns:
+                df.rename(columns={'Date': 'date'}, inplace=True)
+            elif 'date' not in df.columns:
+                print(f"No date column found in {path}.")
+                continue
             
-            # Process each series (column) in the CSV
-            for series_id in df.columns[1:]:  # Skip 'date' column
-                try:
-                    # 1. Save metadata
-                    data_type = 'financial' if source in ["vix", "dxy", "sp_500", "nasdaq"] else 'economic'
-                    csv_fetcher.save_metadata(series_id, data_type, 'csv_file')
-                    self.stdout.write(self.style.SUCCESS(f"Saved metadata for series: {series_id}"))
+            # Determine date format for this source
+            date_format = self.date_formats.get(source, '%d/%m/%Y')
+            df['date'] = pd.to_datetime(df['date'], format=date_format, errors='coerce')
+            df.sort_values(by='date', inplace=True)
+            df = df.dropna(subset=['date'])
 
-                    # 2. Prepare time series data
-                    series_df = df[['date', series_id]].copy()
-                    series_df['date'] = pd.to_datetime(series_df['date']).dt.strftime('%Y-%m-%d')
-                    series_df[series_id] = pd.to_numeric(series_df[series_id], errors='coerce')
-                    series_df = series_df.dropna()
+            # Define data type based on source
+            data_type = 'financial' if source in financial_sources else 'economic'
 
-                    # 3. Format for BigQuery
-                    historical_rows = [
-                        {
-                            'series_id': series_id,
-                            'date': row['date'],
-                            'value': float(row[series_id])
-                        }
-                        for _, row in series_df.iterrows()
-                    ]
+            # Create an instance of DataSeries to contain the series metadata
+            try:
+                ds_instance = csv_fetcher.save_metadata(source, data_type, 'csv_file')
+            except Exception as e:
+                print(f"Error saving metadata for {source}: {e}")
+                # Depending on needs, continue or handle error
+                continue
 
-                    # 4. Load to BigQuery
-                    if historical_rows:
-                        table_id = self.FINANCIAL_TABLE_ID if data_type == 'financial' else self.ECONOMIC_TABLE_ID
-                        load_historical_economic_data_to_bq(table_id, historical_rows)
-                        self.stdout.write(self.style.SUCCESS(
-                            f"Loaded {len(historical_rows)} rows for {series_id} into {table_id}"
-                        ))
-                except Exception as e:
-                    self.stderr.write(self.style.ERROR(f"Error processing {series_id}: {e}"))
+            # Use the DataSeries instance created from the file key
+            main_series = ds_instance.series_id  # e.g. "pmi_manufacturing"
+            last_data_main = ds_instance.last_data_date
+
+            if data_type == 'financial':
+                # Process financial CSV: assume columns include date, open, high, low, close, volume.
+                required_cols = {"open", "high", "low", "close", "volume"}
+                if not required_cols.issubset(df.columns):
+                    print(f"Missing one of required columns {required_cols} in {source}")
                     continue
-    
+
+                financial_rows = []
+                for _, row in df.iterrows():
+                    row_date = row['date'].strftime('%Y-%m-%d')
+                    if last_data_main and row_date <= last_data_main.strftime('%Y-%m-%d'):
+                        continue  # Skip rows that have already been fetched
+                    financial_rows.append({
+                        'series_id': source,
+                        'date': row_date,
+                        'open': float(row['open']) if pd.notna(row['open']) else None,
+                        'high': float(row['high']) if pd.notna(row['high']) else None,
+                        'low': float(row['low']) if pd.notna(row['low']) else None,
+                        'close': float(row['close']) if pd.notna(row['close']) else None,
+                        'volume': int(row['volume']) if pd.notna(row['volume']) else None,
+                    })
+                if financial_rows:
+                    load_csv_in_chunks_to_bq(self.FINANCIAL_TABLE_ID, financial_rows, financial_schema)
+                    # update the corresponding ds_instance.last_data_date here after successful load.
+                    new_latest_date = max(row['date'] for row in financial_rows)
+                    ds_instance.metadata['last_fetched_date'] = new_latest_date
+                    ds_instance.last_data_date = new_latest_date  # update last_data_date here
+                    ds_instance.save()
+                    logger.info(f"Economic series {ds_instance.series_id} updated: last_fetched_date and last_data_date are now {new_latest_date}")
+                else:
+                    print(f"No new financial data for {source}")
+                continue
+
+            # Process economic CSV:
+            # For economic files, we want one DataSeries instance for the file.
+            # Every non-date column is a subcomponent. We use the main_series as series_id.
+            economic_rows = []
+            for _, row in df.iterrows():
+                date_str = row['date'].strftime('%Y-%m-%d')
+                for col in df.columns:
+                    if col == 'date':
+                        continue
+                    val = row[col]
+                    if pd.notna(val):
+                        # Use main_series as the series_id; store col as the component.
+                        if last_data_main and date_str <= last_data_main.strftime('%Y-%m-%d'):
+                            continue  # Skip rows already fetched
+                        economic_rows.append({
+                            'series_id': main_series,
+                            'date': date_str,
+                            'component': col,
+                            'value': float(val),
+                        })
+            if economic_rows:
+                load_csv_to_bq(self.ECONOMIC_TABLE_ID, economic_rows, economic_schema)
+                new_latest_date = max(datetime.strptime(r['date'], '%Y-%m-%d') for r in economic_rows)
+                ds_instance.metadata['last_fetched_date'] = new_latest_date.strftime('%Y-%m-%d')
+                ds_instance.last_data_date = new_latest_date
+                ds_instance.save()
+                logger.info(f"Economic series {ds_instance.series_id} updated: last_data_date is now {new_latest_date}")
+            else:
+                print(f"No new economic data for {source}")
+
     def prepare_data(self, fred_series_ids):
         """
         Scrape S&P 500 tickers from Wikipedia => create data list for 'financial'.
@@ -231,8 +327,14 @@ class Command(BaseCommand):
                     })
 
             # 2e) Bulk load the historical data once
+            economic_schema = [
+                bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
+                bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
+                bigquery.SchemaField("component", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("value", "FLOAT64", mode="NULLABLE"),
+            ]
             try:
-                load_historical_economic_data_to_bq(self.ECONOMIC_TABLE_ID, historical_rows)
+                load_csv_to_bq(self.ECONOMIC_TABLE_ID, historical_rows, economic_schema)
                 self.stdout.write(self.style.SUCCESS(
                     f"Loaded {len(historical_rows)} older FRED rows into {self.ECONOMIC_TABLE_ID}"
                 ))

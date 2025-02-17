@@ -271,13 +271,10 @@ class DataFetcher(ABC):
         client.delete_table(staging_table_id, not_found_ok=True)
         logger.info(f"Deleted staging table {staging_table_id}")
 
-        # Update last_fetched_date
+         # Update last_fetched_date and last_data_date
         new_latest_date = max(row['date'] for row in staging_rows)
         data_series_instance.metadata['last_fetched_date'] = new_latest_date
-        data_series_instance.save()
-
-        # Use timezone-aware now
+        data_series_instance.last_data_date = new_latest_date  # new update for last_data_date
         data_series_instance.last_updated = datetime.now(timezone.utc)
         data_series_instance.save()
-
-        logger.info(f"Finished MERGE for {series_id}. last_fetched_date is now {new_latest_date}")
+        logger.info(f"Finished MERGE for {series_id}. last_fetched_date and last_data_date are now {new_latest_date}")

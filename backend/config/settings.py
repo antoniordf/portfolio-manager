@@ -14,6 +14,9 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 import sys
+# import logging
+
+# logging.basicConfig(level=logging.DEBUG)
 
 load_dotenv()
 

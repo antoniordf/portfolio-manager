@@ -1,12 +1,11 @@
 import logging
-import os, tempfile
-from venv import logger
 from django.conf import settings
 import requests
 from datetime import datetime
 from google.cloud import bigquery
 import io
 import csv
+import pandas as pd
 
 client = bigquery.Client()
 ECONOMIC_TABLE_ID = settings.ECONOMIC_TABLE_ID
@@ -160,99 +159,97 @@ def parse_series_data(response_json, data_origin):
     if data_origin == 'fred':
         return [{'date': obs['date'], 'value': obs['value']} for obs in response_json['observations']]
     
-def load_historical_economic_data_to_bq(table_id: str, data_rows: list[dict]):
+def load_csv_in_chunks_to_bq(table_id: str, data_rows: list[dict], schema: list[bigquery.SchemaField], chunk_size_days: int = 3000):
     """
-    Loads older (or any) economic data into BigQuery via a load job.
+    Splits the data_rows into chunks by date (using chunk_size_days as the maximum span per chunk)
+    and loads each chunk into BigQuery by calling load_csv_to_bq.
 
-    Expects data_rows in the form:
-    [
-      {
-        "series_id": "GDPC1",
-        "date": "1960-01-01",
-        "value": 123.45
-      },
-      {
-        "series_id": "CPIAUCSL",
-        "date": "1960-01-01",
-        "value": 99.99
-      },
-      ...
-    ]
-
-    'table_id' is the full BigQuery table identifier, e.g.:
-        "your-project.your_dataset.economic_data_points"
+    Args:
+        table_id: Fully-qualified BigQuery table id (e.g., "project.dataset.table").
+        data_rows: List of dictionaries representing rows.
+        schema: List of BigQuery SchemaField objects for the target table.
+        chunk_size_days: Maximum number of days per chunk (default is 3000 days).
     """
+    if not data_rows:
+        return
 
+    # Convert the list of rows into a DataFrame and ensure 'date' is a datetime column.
+    df = pd.DataFrame(data_rows)
+    df['date'] = pd.to_datetime(df['date'], dayfirst=False)
+    df = df.dropna(subset=['date'])
+    df.sort_values(by='date', inplace=True)
+
+    # Determine the date range
+    min_date = df['date'].min()
+    max_date = df['date'].max()
+
+    # Iterate over the full range in increments of chunk_size_days.
+    current_start = min_date
+    while current_start < max_date:
+        current_end = current_start + pd.Timedelta(days=chunk_size_days)
+        # Select the chunk of rows that fall within this date interval.
+        chunk_df = df[(df['date'] >= current_start) & (df['date'] < current_end)].copy()
+        if not chunk_df.empty:
+            # Convert the 'date' column to strings in 'YYYY-MM-DD' format
+            chunk_df = chunk_df.assign(date=chunk_df['date'].dt.strftime('%Y-%m-%d'))
+            # Convert the chunk back to a list of dictionaries.
+            chunk_rows = chunk_df.to_dict(orient='records')
+            # Call your existing load_csv_to_bq function for this chunk.
+            load_csv_to_bq(table_id, chunk_rows, schema)
+        current_start = current_end
+    
+def load_csv_to_bq(table_id: str, data_rows: list[dict], schema: list[bigquery.SchemaField]):
     client = bigquery.Client()
 
-    # 1) Convert data_rows into an in-memory CSV with series_id, date, value
-    csv_buffer = io.StringIO()
-    writer = csv.writer(csv_buffer)
-    writer.writerow(["series_id", "date", "value"])  # CSV header
-
-    # Inspect for suspicious values
-    suspicious_count = 0
-
+    # Deduplicate rows
+    unique_new_rows = []
+    seen = set()
     for row in data_rows:
-        # Check if row["value"] is something like NaN or "NaT"
-        if str(row["value"]) == "NaN" or str(row["value"]) == "NaT":
-            logger.warning(f"Suspicious row: {row}")
-            suspicious_count += 1
-            
-        writer.writerow([
-            row["series_id"],
-            row["date"],
-            row["value"],
-        ])
+        key = (row.get('series_id'), row.get('date'), row.get('component'))
+        if key not in seen:
+            seen.add(key)
+            unique_new_rows.append(row)
 
-    if suspicious_count > 0:
-        logger.warning(f"Found {suspicious_count} suspicious rows in data_rows. Investigate them.")
+    # Filter out rows with missing or invalid values for required fields
+    filtered_rows = []
+    for row in unique_new_rows:
+        valid = True
+        new_row = {}
+        for field in schema:
+            value = row.get(field.name)
+            # For REQUIRED fields, if missing or invalid, mark row as invalid.
+            if field.mode == "REQUIRED":
+                if value is None or (isinstance(value, float) and pd.isna(value)):
+                    valid = False
+                    break
+            # For numeric fields, replace NaN with None
+            if field.field_type in ["FLOAT64", "INTEGER"]:
+                if isinstance(value, float) and pd.isna(value):
+                    value = None
+            new_row[field.name] = value
+        if valid:
+            filtered_rows.append(new_row)
 
-    csv_buffer.seek(0)  # rewind
-
-    # 2) DEBUG: Write CSV to a temp file so you can manually open + inspect
-    custom_temp_dir = os.path.expanduser("~/my_debug_csvs")
-    os.makedirs(custom_temp_dir, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode='w',
-        delete=True,
-        suffix='.csv',
-        dir=custom_temp_dir,
-        prefix='my_fred_debug_'
-    ) as tmpfile:
-        tmpfile_name = tmpfile.name
-        logger.info(f"Writing debug CSV to: {tmpfile_name}")
-        tmpfile.write(csv_buffer.getvalue())
-    # After this, the file remains on disk, so you can open in Excel or similar.
-
-    # (Rewind the buffer again after writing to tmpfile)
+    # Convert rows to CSV in memory
+    csv_buffer = io.StringIO()
+    writer = csv.DictWriter(csv_buffer, fieldnames=[f.name for f in schema])
+    writer.writeheader()
+    writer.writerows(filtered_rows)
     csv_buffer.seek(0)
 
-    # 3) Configure the load job
     job_config = bigquery.LoadJobConfig(
-        schema=[
-            bigquery.SchemaField("series_id", "STRING", mode="REQUIRED"),
-            bigquery.SchemaField("date", "DATE", mode="REQUIRED"),
-            bigquery.SchemaField("value", "FLOAT64", mode="NULLABLE"),
-        ],
+        schema=schema,
         source_format=bigquery.SourceFormat.CSV,
         skip_leading_rows=1,
-        write_disposition="WRITE_APPEND",  # or "WRITE_TRUNCATE" to overwrite
+        write_disposition="WRITE_APPEND",
+        schema_update_options=[bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION],
     )
 
-    # 4) Run the load job
-    try:
-        load_job = client.load_table_from_file(
-            csv_buffer,
-            table_id,
-            job_config=job_config,
-        )
-        load_job.result()  # Wait for it to finish
-        print(f"Loaded {len(data_rows)} economic rows into '{table_id}'.")
-    except Exception as e:
-        print(f"Failed to load data into BigQuery: {e}")
-
+    load_job = client.load_table_from_file(csv_buffer, table_id, job_config=job_config)
+    load_job.result()  # Wait for completion
+    print(f"Loaded {len(filtered_rows)} rows into {table_id}.")
+    
+    
 def create_temp_dataset_if_not_exists() -> str:
     """
     Ensures that a staging dataset for merges/temporary tables exists in BigQuery.
