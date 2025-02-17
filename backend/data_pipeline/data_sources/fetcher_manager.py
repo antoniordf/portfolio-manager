@@ -1,4 +1,4 @@
-from typing import Type
+from .csv import CSVFetcher
 from .fred import FREDFetcher
 from .polygon import PolygonFetcher
 
@@ -10,12 +10,13 @@ class FetcherManager:
     FETCHERS = {
         'fred': FREDFetcher,
         'polygon': PolygonFetcher,
+        'csv': CSVFetcher,
         # Add other data sources here
     }
 
     @classmethod
-    def get_fetcher(cls, data_origin: str, api_key: str):
+    def get_fetcher(cls, data_origin: str, api_key: str, **kwargs):
         fetcher_class = cls.FETCHERS.get(data_origin.lower())
         if not fetcher_class:
             raise ValueError(f"No fetcher available for data origin: {data_origin}")
-        return fetcher_class(api_key)
+        return fetcher_class(api_key, **kwargs)

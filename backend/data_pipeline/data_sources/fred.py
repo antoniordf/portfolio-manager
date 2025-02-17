@@ -54,9 +54,10 @@ class FREDFetcher(DataFetcher):
             date_str = obs['date']
             value_str = obs['value']
             
-            if value_str in ('', None):
-                logger.error(f"Missing value for observation on {date_str}: {obs}")
-                raise ValueError("Missing value in observation.")
+             # If the raw string is '.' or blank or None, skip it
+            if value_str in ('.', '', None):
+                logger.warning(f"Skipping invalid observation for date={date_str}: {value_str}")
+                continue
             
             try:
                 value = float(value_str)

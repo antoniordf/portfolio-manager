@@ -13,6 +13,10 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import sys
+# import logging
+
+# logging.basicConfig(level=logging.DEBUG)
 
 load_dotenv()
 
@@ -62,14 +66,36 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'graphene_django',
-    'data_fetch.apps.DataFetchConfig',
+    'data_pipeline.apps.DataPipelineConfig',
     'dashboard.apps.DashboardConfig',
     'rest_framework',
 ]
 
 GRAPHENE = {
-    'SCHEMA': 'config.schema.schema'
+    'SCHEMA': 'schema.schema'
 }
+
+# Redis Caching
+if 'test' in sys.argv:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': os.getenv("REDIS_TEST_URL"),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': os.getenv("REDIS_URL"),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        }
+    }
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -116,6 +142,11 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT'),
     }
 }
+
+# BigQuery Table IDs
+FINANCIAL_TABLE_ID = os.getenv('FINANCIAL_TABLE_ID')
+ECONOMIC_TABLE_ID = os.getenv('ECONOMIC_TABLE_ID')
+STAGING_DATASET_ID = os.getenv('STAGING_DATASET_ID')
 
 
 # Password validation

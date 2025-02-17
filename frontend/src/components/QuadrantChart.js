@@ -11,19 +11,9 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-import { useQuery, gql } from "@apollo/client";
+import { useQuery } from "@apollo/client";
+import { GET_QUADRANT_DATA } from "../queries/getQuadrantChartData";
 import CustomTooltip from "./CustomTooltip";
-
-// Define the GraphQL query
-const GET_QUADRANT_DATA = gql`
-  query GetQuadrantData($dataPoints: Int!) {
-    quadrantData(dataPoints: $dataPoints) {
-      date
-      gdpGrowth
-      inflationGrowth
-    }
-  }
-`;
 
 function QuadrantChart() {
   const [data, setData] = useState([]);
@@ -35,6 +25,7 @@ function QuadrantChart() {
     data: queryData,
   } = useQuery(GET_QUADRANT_DATA, {
     variables: { dataPoints: 15 },
+    fetchPolicy: "cache-first",
   });
 
   useEffect(() => {
@@ -100,7 +91,7 @@ function QuadrantChart() {
   }, [data]);
 
   if (loading) return <p>Loading...</p>;
-  if (error) return <p>Error fetching data.</p>;
+  if (error) console.log(error); // return <p>Error fetching data.</p>;
 
   return (
     <ResponsiveContainer width="100%" height={600}>
